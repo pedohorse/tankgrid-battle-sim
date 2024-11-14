@@ -1,70 +1,130 @@
 use std::cmp::Eq;
 use std::collections::HashMap;
+use std::hash::Hash;
 use std::marker::PhantomData;
-use std::sync::mpsc::{Receiver, Sender, TryRecvError};
+use std::sync::mpsc::{Sender, TryRecvError};
 use std::thread;
 use std::time::{self, Instant};
 use std::{cell::RefCell, rc::Rc, sync::mpsc};
 
-use crate::player_state::PlayerControl;
-
+use super::gametime::GameTime;
 use super::map::MapReadAccess;
+use super::map_object::MapObject;
+use super::map_prober::MapProber;
 use super::maptile_logic::MaptileLogic;
+use super::object_layer::ObjectLayer;
+use super::player_state::PlayerControl;
+use super::script_repr::{FromScriptRepr, ToScriptRepr};
 
+use rustpython_vm::convert::ToPyObject;
 use rustpython_vm::{compiler, Interpreter, PyResult, VirtualMachine};
 
 #[derive(Clone, Copy, PartialEq, Eq, Hash)]
-pub enum PlayerCommand {
+pub enum PlayerCommand<R> {
     MoveFwd,
     TurnCW,
     TurnCCW,
+    Shoot,
+    Wait,
+    Look(R),
     Finish,
 }
 
-#[derive(Clone, Copy)]
-pub enum PlayerCommandReply {
+#[derive(Clone)]
+pub enum PlayerCommandReply<T>
+where
+    T: Send + 'static,
+{
     None,
+    LookResult(Vec<T>),
 }
 
-pub struct Battle<T, M, L, R, P>
+pub struct ObjectCacheRepr<R> {
+    pos: (i64, i64),
+    rot: R,
+    seethroughable: bool,
+    passable: bool,
+    script_repr: String,
+}
+
+impl<R> MapObject<R> for ObjectCacheRepr<R>
+where
+    R: Copy,
+{
+    fn orientation(&self) -> R {
+        self.rot
+    }
+
+    fn position(&self) -> (i64, i64) {
+        self.pos
+    }
+
+    fn passable(&self) -> bool {
+        self.passable
+    }
+
+    fn seethroughable(&self) -> bool {
+        self.seethroughable
+    }
+}
+
+impl<R> ToScriptRepr for ObjectCacheRepr<R> {
+    fn to_script_repr(&self) -> String {
+        self.script_repr.clone()
+    }
+}
+
+pub struct Battle<T, M, L, R, P, Pr, OCache>
 where
     L: MaptileLogic<T>,
     M: MapReadAccess<T>,
-    P: PlayerControl<R, M, T, L>,
+    R: Copy,
+    P: PlayerControl<R, M, T, L, ObjectCacheRepr<R>, OCache>,
+    Pr: MapProber<T, R, M, L, ObjectCacheRepr<R>, OCache>,
+    OCache: ObjectLayer<R, ObjectCacheRepr<R>>,
 {
     map: M,
     logic: L,
+    map_prober: Pr,
     player_states: Vec<P>,
     player_programs: Vec<String>,
-    time: usize,
-    command_durations: HashMap<PlayerCommand, usize>,
+    time: GameTime,
+    command_durations: HashMap<PlayerCommand<R>, GameTime>,
+    object_layer: OCache,
     _marker0: PhantomData<T>,
     _marker1: PhantomData<R>,
 }
 
-pub const DEFAULT_COMMAND_DURATION: usize = 10;
+pub const DEFAULT_COMMAND_DURATION: GameTime = 10;
 
-impl<T, M, L, R, P> Battle<T, M, L, R, P>
+impl<T, M, L, R, P, Pr, OCache> Battle<T, M, L, R, P, Pr, OCache>
 where
-    T: Copy + Clone,
+    T: Copy + Clone + Send + ToScriptRepr,
     L: MaptileLogic<T>,
     M: MapReadAccess<T>,
-    P: PlayerControl<R, M, T, L>,
+    R: Copy + Clone + Eq + Hash + Send + 'static + FromScriptRepr,
+    P: PlayerControl<R, M, T, L, ObjectCacheRepr<R>, OCache> + MapObject<R> + ToScriptRepr,
+    Pr: MapProber<T, R, M, L, ObjectCacheRepr<R>, OCache>,
+    OCache: ObjectLayer<R, ObjectCacheRepr<R>>,
 {
     pub fn new(
         map: M,
         logic: L,
-        player_initial_states: Vec<P>,
-        player_programs: Vec<String>,
-        command_durations: HashMap<PlayerCommand, usize>,
-    ) -> Battle<T, M, L, R, P> {
+        map_prober: Pr,
+        player_initial_states_and_programs: Vec<(P, String)>,
+        command_durations: HashMap<PlayerCommand<R>, usize>,
+    ) -> Battle<T, M, L, R, P, Pr, OCache> {
+        let (player_states, player_programs): (Vec<P>, Vec<String>) =
+            player_initial_states_and_programs.into_iter().unzip();
         Battle {
             map,
             logic,
-            player_states: player_initial_states,
+            map_prober,
+            player_states,
             player_programs,
             time: 0,
             command_durations,
+            object_layer: OCache::new(),
             _marker0: PhantomData,
             _marker1: PhantomData,
         }
@@ -72,6 +132,14 @@ where
 
     pub fn time(&self) -> usize {
         self.time
+    }
+
+    pub fn player_state(&self, i: usize) -> &P {
+        &self.player_states[i]
+    }
+
+    pub fn map(&self) -> &M {
+        &self.map
     }
 
     pub fn run_simulation(&mut self) {
@@ -92,7 +160,7 @@ where
                 channels.push((command_receiver, result_sender));
             }
 
-            let mut next_commands: Vec<Option<(PlayerCommand, &Sender<_>, usize)>> =
+            let mut next_commands: Vec<Option<(PlayerCommand<R>, &Sender<_>, GameTime)>> =
                 vec![None; player_count];
 
             let mut start_timestamps = vec![time::Instant::now(); player_count];
@@ -156,11 +224,33 @@ where
                         .map(|(player_i, k)| {
                             // calc remaining duration and other useful things
                             let (com, _, command_start_gametime) = k.as_ref().unwrap();
-                            let duration = if let Some(x) = self.command_durations.get(com) {
-                                *x
+                            let player_state = &mut self.player_states[player_i];
+                            // duration is based on map modifiers
+                            let duration = if let Some(dur) = self.command_durations.get(com) {
+                                let tile = {
+                                    let (x, y) = player_state.position();
+                                    self.map.get_tile_at(x, y)
+                                };
+                                let speed_percentage = match com {
+                                    PlayerCommand::MoveFwd => {
+                                        self.logic.pass_speed_percentage(tile)
+                                    }
+                                    PlayerCommand::TurnCW | PlayerCommand::TurnCCW => {
+                                        self.logic.turn_speed_percentage(tile)
+                                    }
+                                    _ => 100,
+                                };
+                                // speed = 0 means we misconfigured something
+                                let speed_percentage = if speed_percentage == 0 {
+                                    eprintln!("[WARNING] tile speed == 0, seems like a misconfiguration, ignoring");
+                                    100
+                                } else { speed_percentage };
+
+                                (*dur * 100) / (speed_percentage as usize)
                             } else {
                                 DEFAULT_COMMAND_DURATION
                             };
+                            //
                             (command_start_gametime + duration - self.time, player_i, k)
                         })
                         .min_by_key(|k| k.0)
@@ -170,19 +260,48 @@ where
                         let (com, reply_channel, _) = next_command.take().unwrap();
 
                         // TODO: process the command
-                        let player_state = &mut self.player_states[player_i];
                         let reply = match com {
                             PlayerCommand::MoveFwd => {
-                                player_state.move_forward(&mut self.map, &self.logic);
+                                let player_state = &mut self.player_states[player_i];
+                                player_state.move_forward(&mut self.map, &self.logic, &self.object_layer);
+                                // TODO: interact with the object if moved onto one
                                 PlayerCommandReply::None
                             }
                             PlayerCommand::TurnCW => {
-                                player_state.turn_cw(&mut self.map, &self.logic);
+                                let player_state = &mut self.player_states[player_i];
+                                player_state.turn_cw(&mut self.map, &self.logic, &self.object_layer);
                                 PlayerCommandReply::None
                             }
                             PlayerCommand::TurnCCW => {
-                                player_state.turn_ccw(&mut self.map, &self.logic);
+                                let player_state = &mut self.player_states[player_i];
+                                player_state.turn_ccw(&mut self.map, &self.logic, &self.object_layer);
                                 PlayerCommandReply::None
+                            }
+                            PlayerCommand::Shoot => {
+                                // TODO: SHOOT !!
+                                PlayerCommandReply::None
+                            }
+                            PlayerCommand::Wait => {
+                                PlayerCommandReply::None
+                            }
+                            PlayerCommand::Look(ori) => {
+                                let position = self.player_states[player_i].position();
+                                self.object_layer.clear();
+                                for player in self.player_states.iter() {
+                                    self.object_layer.add(ObjectCacheRepr {
+                                        pos: player.position(),
+                                        rot: player.orientation(),
+                                        seethroughable: player.seethroughable(),
+                                        passable: player.passable(),
+                                        script_repr: player.to_script_repr(),
+                                    });
+                                }
+                                //self.recreate_objects_layer();
+                                let look_result = self.map_prober.look(position, &self.map, &self.logic, &self.object_layer, ori).into_iter().map(|(t, maybe_obj)| {
+                                    (t.to_script_repr(), maybe_obj.map(|obj| {obj.to_script_repr()}))
+                                }).collect();
+
+                                PlayerCommandReply::LookResult(look_result)
                             }
                             PlayerCommand::Finish => {
                                 unreachable!();
@@ -227,10 +346,16 @@ where
         });
     }
 
+    ///
+    /// this is ran in a dedicated thread
+    /// this represents a single tank AI,
+    /// and runs a python interpreter with player ai code
+    ///
+    /// returns success or error if code produced an exception
     fn program_runner(
         program: String,
-        command_channel: mpsc::Sender<PlayerCommand>,
-        reply_channel: mpsc::Receiver<PlayerCommandReply>,
+        command_channel: mpsc::Sender<PlayerCommand<R>>,
+        reply_channel: mpsc::Receiver<PlayerCommandReply<(String, Option<String>)>>,
     ) -> Result<(), ()> {
         macro_rules! send_command {
             ($vm:ident, $command_channel:ident, $reply_channel:ident, $cmd:expr) => {{
@@ -282,7 +407,7 @@ where
                 let command_channel = Rc::downgrade(&command_channel);
                 move |vm: &VirtualMachine| -> PyResult<()> {
                     println!("TEST: turn_cw");
-                    let ret =
+                    let _ret =
                         send_command!(vm, command_channel, reply_channel, PlayerCommand::TurnCW);
                     PyResult::Ok(())
                 }
@@ -292,7 +417,7 @@ where
                 let command_channel = Rc::downgrade(&command_channel);
                 move |vm: &VirtualMachine| -> PyResult<()> {
                     println!("TEST: turn_ccw");
-                    let ret =
+                    let _ret =
                         send_command!(vm, command_channel, reply_channel, PlayerCommand::TurnCCW);
                     PyResult::Ok(())
                 }
@@ -302,9 +427,59 @@ where
                 let command_channel = Rc::downgrade(&command_channel);
                 move |vm: &VirtualMachine| -> PyResult<()> {
                     println!("TEST: move_forward");
-                    let ret =
+                    let _ret =
                         send_command!(vm, command_channel, reply_channel, PlayerCommand::MoveFwd);
                     PyResult::Ok(())
+                }
+            });
+            add_function!("shoot", {
+                let reply_channel = Rc::downgrade(&reply_channel);
+                let command_channel = Rc::downgrade(&command_channel);
+                move |vm: &VirtualMachine| -> PyResult<()> {
+                    println!("TEST: shoot");
+                    let _ret =
+                        send_command!(vm, command_channel, reply_channel, PlayerCommand::Shoot);
+                    PyResult::Ok(())
+                }
+            });
+            add_function!("wait", {
+                let reply_channel = Rc::downgrade(&reply_channel);
+                let command_channel = Rc::downgrade(&command_channel);
+                move |vm: &VirtualMachine| -> PyResult<()> {
+                    println!("TEST: wait");
+                    let _ret =
+                        send_command!(vm, command_channel, reply_channel, PlayerCommand::Wait);
+                    PyResult::Ok(())
+                }
+            });
+            add_function!("look", {
+                let reply_channel = Rc::downgrade(&reply_channel);
+                let command_channel = Rc::downgrade(&command_channel);
+                move |direction: String, vm: &VirtualMachine| -> PyResult<_> {
+                    println!("TEST: look");
+                    let direction = if let Some(x) = R::from_script_repr(&direction) {
+                        x
+                    } else {
+                        return PyResult::Err(
+                            vm.new_runtime_error("bad direction value".to_owned()),
+                        );
+                    };
+                    let ret = send_command!(
+                        vm,
+                        command_channel,
+                        reply_channel,
+                        PlayerCommand::Look(direction)
+                    );
+                    if let PlayerCommandReply::LookResult(look_result) = ret {
+                        PyResult::Ok(
+                            look_result
+                                .into_iter()
+                                .map(|t| t.to_pyobject(&vm))
+                                .collect::<Vec<_>>(),
+                        )
+                    } else {
+                        PyResult::Err(vm.new_runtime_error("unexpected look reply".to_owned()))
+                    }
                 }
             });
 
@@ -323,5 +498,18 @@ where
         interpreter.finalize(None);
         println!("program runner completed");
         ret
+    }
+
+    fn recreate_objects_layer(&mut self) {
+        self.object_layer.clear();
+        for player in self.player_states.iter() {
+            self.object_layer.add(ObjectCacheRepr {
+                pos: player.position(),
+                rot: player.orientation(),
+                seethroughable: player.seethroughable(),
+                passable: player.passable(),
+                script_repr: player.to_script_repr(),
+            });
+        }
     }
 }

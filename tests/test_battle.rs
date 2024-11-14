@@ -1,87 +1,135 @@
 use battle_sim::battle::{PlayerCommand, DEFAULT_COMMAND_DURATION};
+use battle_sim::map_object::MapObject;
 use battle_sim::maptile_logic::MaptileLogic;
+use battle_sim::object_layer::ObjectLayer;
+use battle_sim::player_state::PlayerControl;
 use battle_sim::r#impl::grid_battle::{GridBattle, GridPlayerState};
 use battle_sim::r#impl::grid_map::GridBattleMap;
-use battle_sim::r#impl::player_gridmap_control::GridOrientation;
+use battle_sim::r#impl::grid_map_prober::GridMapProber;
+use battle_sim::r#impl::grid_orientation::GridOrientation;
+use battle_sim::script_repr::ToScriptRepr;
 use std::collections::HashMap;
 
 #[derive(Clone, Copy)]
-enum TileType {
+enum SimpleTileType {
     Nothin,
+}
+
+impl ToScriptRepr for SimpleTileType {
+    fn to_script_repr(&self) -> String {
+        "empty_tile".to_owned()
+    }
 }
 
 struct TestTrivialLogic {}
 
 impl<T> MaptileLogic<T> for TestTrivialLogic {
     // trivial impl
-    fn move_from(tile: T) -> T {
+    fn move_from(&self, tile: T) -> T {
         tile
     }
-    fn move_onto(tile: T) -> T {
+    fn move_onto(&self, tile: T) -> T {
         tile
     }
-    fn passible(tile: T) -> bool {
+    fn pass_speed_percentage(&self, _tile: T) -> u32 {
+        100
+    }
+    fn turn_speed_percentage(&self, _tile: T) -> u32 {
+        100
+    }
+    fn passable(&self, _tile: T) -> bool {
         true
     }
-    fn seethroughable(tile: T) -> bool {
+    fn seethroughable(&self, _tile: T) -> bool {
         true
     }
-    fn shoot(tile: T) -> T {
+    fn shoot(&self, tile: T) -> T {
         tile
+    }
+}
+
+struct TestNoObjectCache {}
+
+impl<MObj> ObjectLayer<GridOrientation, MObj> for TestNoObjectCache
+where
+    MObj: MapObject<GridOrientation>,
+{
+    fn new() -> Self {
+        TestNoObjectCache {}
+    }
+    fn add(&mut self, obj: MObj) {}
+    fn clear(&mut self) {}
+    fn objects(&self) -> &[MObj] {
+        &[]
+    }
+    fn objects_at(&self, x: i64, y: i64) -> Vec<&MObj> {
+        Vec::new()
     }
 }
 
 #[test]
 fn testtest() {
-    let map = GridBattleMap::new(2, 2, TileType::Nothin, TileType::Nothin);
+    let map = GridBattleMap::new(2, 2, SimpleTileType::Nothin, SimpleTileType::Nothin);
     let mut b = GridBattle::new(
         map,
         TestTrivialLogic {},
-        vec![GridPlayerState::new(0, 0, GridOrientation::Down)],
-        vec!["\
-        print('hell-o')\n\
-        turn_cw()\n\
-        print('yeah!')\n\
-        "
-        .to_owned()],
+        GridMapProber {},
+        vec![(
+            GridPlayerState::new(0, 0, GridOrientation::Down),
+            "\
+            print('hell-o')\n\
+            turn_cw()\n\
+            print('yeah!')\n\
+            "
+            .to_owned(),
+        )],
         HashMap::new(),
     );
     b.run_simulation();
     assert_eq!(DEFAULT_COMMAND_DURATION, b.time());
+    assert_eq!(GridOrientation::Left, b.player_state(0).orientation)
 }
 
 #[test]
 fn test2players() {
-    let map = GridBattleMap::new(2, 2, TileType::Nothin, TileType::Nothin);
+    let map = GridBattleMap::new(2, 2, SimpleTileType::Nothin, SimpleTileType::Nothin);
     let mut b = GridBattle::new(
         map,
         TestTrivialLogic {},
+        GridMapProber {},
         vec![
-            GridPlayerState::new(0, 0, GridOrientation::Down),
-            GridPlayerState::new(1, 1, GridOrientation::Up),
-        ],
-        vec![
-            "\
-        print('hell-o')\n\
-        turn_cw()\n\
-        print('foo')\n\
-        turn_cw()\n\
-        print('yeah!')\n\
-        "
-            .to_owned(),
-            "\
-        print('second')\n\
-        turn_ccw()\n\
-        print('second yeah!')\n\
-        "
-            .to_owned(),
+            (
+                GridPlayerState::new(0, 0, GridOrientation::Down),
+                "\
+                print('hell-o')\n\
+                turn_cw()\n\
+                print('foo')\n\
+                turn_cw()\n\
+                print('yeah!')\n\
+                "
+                .to_owned(),
+            ),
+            (
+                GridPlayerState::new(2, 2, GridOrientation::Up),
+                "\
+                print('second')\n\
+                move_forward()\n\
+                print('second yeah!')\n\
+                "
+                .to_owned(),
+            ),
         ],
         HashMap::from([
             (PlayerCommand::MoveFwd, 100),
             (PlayerCommand::TurnCW, 10),
-            (PlayerCommand::TurnCCW, 20),
+            (PlayerCommand::MoveFwd, 20),
         ]),
     );
     b.run_simulation();
     assert_eq!(DEFAULT_COMMAND_DURATION * 2, b.time());
+    assert_eq!(GridOrientation::Up, b.player_state(0).orientation);
+    assert_eq!(0, b.player_state(0).row);
+    assert_eq!(0, b.player_state(0).col);
+    assert_eq!(1, b.player_state(1).row);
+    assert_eq!(2, b.player_state(1).col);
 }

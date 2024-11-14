@@ -25,6 +25,9 @@ where
         let y = y as usize;
         self.map_data.row(y)[x]
     }
+    fn is_within_bounds(&self, x: i64, y: i64) -> bool {
+        return x >= 0 && y >= 0 && (x as usize) < self.width && (y as usize) < self.height
+    }
 }
 
 impl<T> MapWriteAccess<T> for GridBattleMap<T>
