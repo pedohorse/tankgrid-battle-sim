@@ -153,8 +153,9 @@ where
             for program in self.player_programs.iter() {
                 let (command_sender, command_receiver) = mpsc::channel();
                 let (result_sender, result_receiver) = mpsc::channel();
-                let handle = scope.spawn(|| {
-                    Self::program_runner(program.clone(), command_sender, result_receiver)
+                let handle = scope.spawn({
+                    let program = program.clone();
+                    || Self::program_runner(program, command_sender, result_receiver)
                 });
                 handles.push(Some(handle));
                 channels.push((command_receiver, result_sender));
@@ -262,17 +263,20 @@ where
                         // TODO: process the command
                         let reply = match com {
                             PlayerCommand::MoveFwd => {
+                                self.recreate_objects_layer();
                                 let player_state = &mut self.player_states[player_i];
                                 player_state.move_forward(&mut self.map, &self.logic, &self.object_layer);
                                 // TODO: interact with the object if moved onto one
                                 PlayerCommandReply::None
                             }
                             PlayerCommand::TurnCW => {
+                                self.recreate_objects_layer();
                                 let player_state = &mut self.player_states[player_i];
                                 player_state.turn_cw(&mut self.map, &self.logic, &self.object_layer);
                                 PlayerCommandReply::None
                             }
                             PlayerCommand::TurnCCW => {
+                                self.recreate_objects_layer();
                                 let player_state = &mut self.player_states[player_i];
                                 player_state.turn_ccw(&mut self.map, &self.logic, &self.object_layer);
                                 PlayerCommandReply::None
@@ -285,19 +289,8 @@ where
                                 PlayerCommandReply::None
                             }
                             PlayerCommand::Look(ori) => {
-                                let position = self.player_states[player_i].position();
-                                self.object_layer.clear();
-                                for player in self.player_states.iter() {
-                                    self.object_layer.add(ObjectCacheRepr {
-                                        pos: player.position(),
-                                        rot: player.orientation(),
-                                        seethroughable: player.seethroughable(),
-                                        passable: player.passable(),
-                                        script_repr: player.to_script_repr(),
-                                    });
-                                }
-                                //self.recreate_objects_layer();
-                                let look_result = self.map_prober.look(position, &self.map, &self.logic, &self.object_layer, ori).into_iter().map(|(t, maybe_obj)| {
+                                self.recreate_objects_layer();
+                                let look_result = self.map_prober.look(self.player_states[player_i].position(), &self.map, &self.logic, &self.object_layer, ori).into_iter().map(|(t, maybe_obj)| {
                                     (t.to_script_repr(), maybe_obj.map(|obj| {obj.to_script_repr()}))
                                 }).collect();
 
