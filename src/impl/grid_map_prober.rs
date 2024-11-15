@@ -34,6 +34,9 @@ where
             tile_logic,
             objects,
             orientation,
+            false,
+            true,
+            false,
             &mut |tile, tile_object| {
                 ret.push((tile, tile_object));
             },
@@ -48,6 +51,9 @@ where
         tile_logic: &L,
         objects: &OL,
         orientation: GridOrientation,
+        stop_at_impassable_objects: bool,
+        stop_at_unseethroughable_objects: bool,
+        stop_at_shootable_objects: bool,
     ) -> Option<(i64, i64)> {
         self.raymarch(
             from,
@@ -55,6 +61,9 @@ where
             tile_logic,
             objects,
             orientation,
+            stop_at_impassable_objects,
+            stop_at_unseethroughable_objects,
+            stop_at_shootable_objects,
             &mut |_, _| {},
         )
     }
@@ -68,6 +77,9 @@ impl GridMapProber {
         tile_logic: &L,
         objects: &'a OL,
         orientation: GridOrientation,
+        stop_at_impassable_objects: bool,
+        stop_at_unseethroughable_objects: bool,
+        stop_at_shootable_objects: bool,
         do_each_step: &mut F,
     ) -> Option<(i64, i64)>
     where
@@ -95,21 +107,23 @@ impl GridMapProber {
                 }
             };
             let tile = map.get_tile_at(x, y);
-            // TODO: see same todo in look
+
             let mut tile_object = None;
-            let mut object_blocks_view = false;
+            let mut object_blocks_ray = false;
             for object in objects.objects_at(x, y) {
                 tile_object = Some(object);
-                object_blocks_view = !object.seethroughable();
+                object_blocks_ray = stop_at_unseethroughable_objects && !object.seethroughable()
+                    || stop_at_impassable_objects && !object.passable()
+                    || stop_at_shootable_objects && object.shootable();
                 break;
             }
             do_each_step(tile, tile_object);
-            if !tile_logic.seethroughable(tile) || object_blocks_view {
-                break;
-            }
-            if !tile_logic.seethroughable(tile) {
+            if !tile_logic.seethroughable(tile) || object_blocks_ray {
                 return Some((x, y));
             }
+            // if this tile is outside bounds - while loop will end after this
+            // if out-of-bounds tile is blocking ray - we'll get it in check above
+            // so all good
         }
         None
     }

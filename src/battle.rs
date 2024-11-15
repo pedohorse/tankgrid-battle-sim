@@ -4,7 +4,7 @@ use std::hash::Hash;
 use std::marker::PhantomData;
 use std::sync::mpsc::{Sender, TryRecvError};
 use std::thread;
-use std::time::{self, Instant};
+use std::time::{self, Duration, Instant};
 use std::{cell::RefCell, rc::Rc, sync::mpsc};
 
 use super::gametime::GameTime;
@@ -17,7 +17,7 @@ use super::player_state::PlayerControl;
 use super::script_repr::{FromScriptRepr, ToScriptRepr};
 
 use rustpython_vm::convert::ToPyObject;
-use rustpython_vm::{compiler, Interpreter, PyResult, VirtualMachine};
+use rustpython_vm::{compiler, Interpreter, PyResult, VirtualMachine, signal::{UserSignalReceiver, UserSignalSendError, user_signal_channel}};
 
 #[derive(Clone, Copy, PartialEq, Eq, Hash)]
 pub enum PlayerCommand<R> {
@@ -36,14 +36,22 @@ where
     T: Send + 'static,
 {
     None,
+    Bool(bool),
     LookResult(Vec<T>),
 }
 
+pub enum ObjectCacheType {
+    Player(usize),
+    //Stuff, // TODO: add stuff like pickable items
+}
+
 pub struct ObjectCacheRepr<R> {
+    obj_type: ObjectCacheType,
     pos: (i64, i64),
     rot: R,
     seethroughable: bool,
     passable: bool,
+    shootable: bool,
     script_repr: String,
 }
 
@@ -96,6 +104,7 @@ where
 }
 
 pub const DEFAULT_COMMAND_DURATION: GameTime = 10;
+pub const VM_THINK_TIMEOUT: time::Duration = time::Duration::from_secs(5);
 
 impl<T, M, L, R, P, Pr, OCache> Battle<T, M, L, R, P, Pr, OCache>
 where
@@ -149,26 +158,44 @@ where
         thread::scope(|scope| {
             let mut handles = Vec::with_capacity(player_count);
             let mut channels = Vec::with_capacity(player_count);
+            let mut thread_stop_signal_senders = Vec::with_capacity(player_count);
 
             for program in self.player_programs.iter() {
                 let (command_sender, command_receiver) = mpsc::channel();
                 let (result_sender, result_receiver) = mpsc::channel();
+                let (thread_stop_sender, thread_stop_receiver) = user_signal_channel();
+
                 let handle = scope.spawn({
                     let program = program.clone();
-                    || Self::program_runner(program, command_sender, result_receiver)
+                    || Self::program_runner(program, command_sender, result_receiver, thread_stop_receiver)
                 });
                 handles.push(Some(handle));
-                channels.push((command_receiver, result_sender));
+                channels.push(Some((command_receiver, result_sender)));
+                thread_stop_signal_senders.push(Some(thread_stop_sender));
             }
 
-            let mut next_commands: Vec<Option<(PlayerCommand<R>, &Sender<_>, GameTime)>> =
+            let mut next_commands: Vec<Option<(PlayerCommand<R>, GameTime)>> =
                 vec![None; player_count];
 
             let mut start_timestamps = vec![time::Instant::now(); player_count];
-            let timeout = time::Duration::from_secs(10);
             loop {
                 let mut players_that_have_commands = 0;
-                for (i, (command_receiver, result_sender)) in channels.iter().enumerate() {
+
+                // check dead
+                for (i, player) in self.player_states.iter().enumerate() {
+                    if player.resource_value(0) <= 0 {
+                        next_commands[i] = Some((PlayerCommand::Finish, self.time));
+                    }
+                }
+
+                for (i, channels_maybe) in channels.iter().enumerate() {
+                    let (command_receiver, _) = if let Some(x) = channels_maybe {
+                        x
+                    } else {
+                        next_commands[i] = Some((PlayerCommand::Finish, self.time));
+                        players_that_have_commands += 1;
+                        continue;
+                    };
                     if let Some(_) = next_commands[i] {
                         players_that_have_commands += 1;
                         continue;
@@ -176,13 +203,12 @@ where
 
                     match command_receiver.try_recv() {
                         Ok(com) => {
-                            next_commands[i] = Some((com, &result_sender, self.time));
+                            next_commands[i] = Some((com, self.time));
                             players_that_have_commands += 1;
                             continue;
                         }
                         Err(TryRecvError::Disconnected) => {
-                            next_commands[i] =
-                                Some((PlayerCommand::Finish, &result_sender, self.time));
+                            next_commands[i] = Some((PlayerCommand::Finish, self.time));
                             players_that_have_commands += 1;
                             continue;
                         }
@@ -190,13 +216,39 @@ where
                     }
                     // so we are still waiting for a command
                     // check for timeout
-                    if time::Instant::now() - start_timestamps[i] > timeout {
-                        // need to kill thread...
-                        // cannot kill the thread, so just detach it
-                        // TODO: think of how to handle this better
-                        handles[i].take();
-                        next_commands[i] = Some((PlayerCommand::Finish, &result_sender, self.time));
+                    if time::Instant::now() - start_timestamps[i] > VM_THINK_TIMEOUT {
+                        next_commands[i] = Some((PlayerCommand::Finish, self.time));
                         players_that_have_commands += 1;
+                    }
+                }
+                let players_that_have_commands = players_that_have_commands; // remove mut
+
+                // ensure closed channels for Finished players
+                for (i, ((next_command, channel), thread_stop_signal_sender)) in next_commands.iter().zip(channels.iter_mut()).zip(thread_stop_signal_senders.iter_mut()).enumerate() {
+                    match (next_command, &channel) {
+                        (Some((PlayerCommand::Finish, _)), Some(_)) => {
+                            channel.take();
+                            // need to kill thread...
+                            if let Some(chan) = thread_stop_signal_sender.take() {
+                                // spray and pray
+                                // in case there are many generic try-except clauses - we just send a shit ton of exceptions to except from exception handlers
+                                for k in 0..999999 {
+                                    match chan.send(Box::new(|vm| {
+                                        Err(vm.new_runtime_error("program stopped".to_owned()))
+                                    })) {
+                                        Ok(_) => {
+                                            if k%10 == 0 {println!("(attempt:{}) trying to stop the vm {} ...", k, i)};
+                                            thread::sleep(Duration::from_nanos(1));
+                                        },
+                                        Err(_) => {
+                                            println!("closing vm failed: probably vm {} already stopped", i);
+                                            break;
+                                        }
+                                    };
+                                }
+                            }
+                        }
+                        _ => {}
                     }
                 }
 
@@ -216,7 +268,7 @@ where
                         .enumerate()
                         .filter(|(_, k)| {
                             // filter out Finish commands
-                            if let (PlayerCommand::Finish, _, _) = k.as_ref().unwrap() {
+                            if let (PlayerCommand::Finish, _) = k.as_ref().unwrap() {
                                 false
                             } else {
                                 true
@@ -224,7 +276,7 @@ where
                         })
                         .map(|(player_i, k)| {
                             // calc remaining duration and other useful things
-                            let (com, _, command_start_gametime) = k.as_ref().unwrap();
+                            let (com, command_start_gametime) = k.as_ref().unwrap();
                             let player_state = &mut self.player_states[player_i];
                             // duration is based on map modifiers
                             let duration = if let Some(dur) = self.command_durations.get(com) {
@@ -258,9 +310,12 @@ where
                     {
                         // process the next command
 
-                        let (com, reply_channel, _) = next_command.take().unwrap();
+                        let (com, _) = next_command.take().unwrap();
+                        
+                        // ONLY Finished command may have None for reply channel by design
+                        //  also we bravely unwrap cuz channels may close only in the start of the loop
+                        let reply_channel = &channels[player_i].as_ref().unwrap().1;
 
-                        // TODO: process the command
                         let reply = match com {
                             PlayerCommand::MoveFwd => {
                                 self.recreate_objects_layer();
@@ -282,7 +337,26 @@ where
                                 PlayerCommandReply::None
                             }
                             PlayerCommand::Shoot => {
-                                // TODO: SHOOT !!
+                                let player_state = &mut self.player_states[player_i];
+                                if player_state.resource_value(1) > 0 {
+                                    player_state.expend_resource(1, 1);
+                                    self.recreate_objects_layer();
+                                    let player_state = &mut self.player_states[player_i];
+                                    if let Some((hit_x, hit_y)) = self.map_prober.raycast(player_state.position(), &self.map, &self.logic, &self.object_layer, player_state.orientation(), true, false, true) {
+                                        for obj_ref in self.object_layer.objects_at(hit_x, hit_y).into_iter() {
+                                            if !obj_ref.shootable() {
+                                                continue;
+                                            }
+                                            match obj_ref.obj_type {
+                                                ObjectCacheType::Player(other_player_i) => {
+                                                    let hit_enemy = &mut self.player_states[other_player_i];
+                                                    hit_enemy.expend_resource(0, 1);
+                                                }
+                                            }
+                                        }
+                                    };
+                                }
+
                                 PlayerCommandReply::None
                             }
                             PlayerCommand::Wait => {
@@ -304,7 +378,7 @@ where
                         if let Err(_) = reply_channel.send(reply) {
                             println!("failed to send reply to the player");
                             // consider player broken
-                            *next_command = Some((PlayerCommand::Finish, reply_channel, self.time));
+                            *next_command = Some((PlayerCommand::Finish, self.time));
                             continue;
                         }
 
@@ -349,6 +423,7 @@ where
         program: String,
         command_channel: mpsc::Sender<PlayerCommand<R>>,
         reply_channel: mpsc::Receiver<PlayerCommandReply<(String, Option<String>)>>,
+        vm_signal_receiver: UserSignalReceiver,
     ) -> Result<(), ()> {
         macro_rules! send_command {
             ($vm:ident, $command_channel:ident, $reply_channel:ident, $cmd:expr) => {{
@@ -380,7 +455,9 @@ where
         let reply_channel = Rc::new(RefCell::new(reply_channel));
         let command_channel = Rc::new(RefCell::new(command_channel));
 
-        let interpreter = Interpreter::without_stdlib(Default::default());
+        let interpreter = Interpreter::with_init(Default::default(), |vm| {
+            vm.set_user_signal_channel(vm_signal_receiver);
+        });
         let ret = interpreter.enter(|vm| {
             let scope = vm.new_scope_with_builtins();
 
@@ -495,12 +572,18 @@ where
 
     fn recreate_objects_layer(&mut self) {
         self.object_layer.clear();
-        for player in self.player_states.iter() {
+        for (i, player) in self.player_states.iter().enumerate() {
+            if player.resource_value(0) <= 0 {
+                // if dead (TODO: may spawn a corpse object instead)
+                continue;
+            }
             self.object_layer.add(ObjectCacheRepr {
+                obj_type: ObjectCacheType::Player(i),
                 pos: player.position(),
                 rot: player.orientation(),
                 seethroughable: player.seethroughable(),
                 passable: player.passable(),
+                shootable: player.shootable(),
                 script_repr: player.to_script_repr(),
             });
         }

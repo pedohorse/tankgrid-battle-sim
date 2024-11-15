@@ -9,4 +9,8 @@ pub trait MapObject<R>: Sized {
     fn passable(&self) -> bool {
         false
     }
+
+    fn shootable(&self) -> bool {
+        true
+    }
 }

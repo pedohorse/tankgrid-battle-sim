@@ -21,6 +21,9 @@ where
         tile_logic: &L,
         object_layer: &OL,
         orientation: R,
+        stop_at_impassable_objects: bool,
+        stop_at_unseethroughable_objects: bool,
+        stop_at_shootable_objects: bool,
     ) -> Option<(i64, i64)>;
 
     /// since we don't know what user script is going to do with the look result -

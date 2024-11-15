@@ -1,9 +1,9 @@
 use crate::map::MapReadAccess;
 use crate::map_object::MapObject;
 use crate::maptile_logic::MaptileLogic;
+use crate::object_layer::ObjectLayer;
 use crate::player_state::PlayerControl;
 use crate::script_repr::ToScriptRepr;
-use crate::object_layer::ObjectLayer;
 
 use super::grid_orientation::GridOrientation;
 //use super::tile_types::TileType;
@@ -14,15 +14,23 @@ pub struct GridPlayerState {
     pub col: i64,
     pub orientation: GridOrientation,
     pub ammo: usize,
+    pub health: usize,
 }
 
 impl GridPlayerState {
-    pub fn new(row: i64, col: i64, orientation: GridOrientation) -> GridPlayerState {
+    pub fn new(
+        col: i64,
+        row: i64,
+        orientation: GridOrientation,
+        ammo: usize,
+        health: usize,
+    ) -> GridPlayerState {
         GridPlayerState {
             row,
             col,
             orientation,
-            ammo: 0,
+            ammo,
+            health,
         }
     }
 }
@@ -38,25 +46,33 @@ where
         match self.orientation {
             GridOrientation::Up => {
                 let tile = map.get_tile_at(self.col, self.row - 1);
-                if logic.passable(tile) && object_layer.objects_at_are_passable(self.col, self.row - 1) {
+                if logic.passable(tile)
+                    && object_layer.objects_at_are_passable(self.col, self.row - 1)
+                {
                     self.row -= 1;
                 }
             }
             GridOrientation::Right => {
                 let tile = map.get_tile_at(self.col + 1, self.row);
-                if logic.passable(tile) && object_layer.objects_at_are_passable(self.col + 1, self.row) {
+                if logic.passable(tile)
+                    && object_layer.objects_at_are_passable(self.col + 1, self.row)
+                {
                     self.col += 1;
                 }
             }
             GridOrientation::Down => {
                 let tile = map.get_tile_at(self.col, self.row + 1);
-                if logic.passable(tile) && object_layer.objects_at_are_passable(self.col, self.row + 1) {
+                if logic.passable(tile)
+                    && object_layer.objects_at_are_passable(self.col, self.row + 1)
+                {
                     self.row += 1;
                 }
             }
             GridOrientation::Left => {
                 let tile = map.get_tile_at(self.col - 1, self.row);
-                if logic.passable(tile) && object_layer.objects_at_are_passable(self.col - 1, self.row) {
+                if logic.passable(tile)
+                    && object_layer.objects_at_are_passable(self.col - 1, self.row)
+                {
                     self.col -= 1;
                 }
             }
@@ -98,27 +114,30 @@ where
     }
 
     fn expend_resource(&mut self, res_id: usize, amount: usize) {
-        if res_id != 0 {
-            return;
-        }
-        self.ammo = if amount >= self.ammo {
-            0
-        } else {
-            self.ammo - amount
+        let res = match res_id {
+            0 => &mut self.health,
+            1 => &mut self.ammo,
+            _ => return,
         };
+
+        *res = if amount >= *res { 0 } else { *res - amount };
     }
+
     fn gain_resource(&mut self, res_id: usize, amount: usize) {
-        if res_id != 0 {
-            return;
-        }
-        self.ammo += amount
+        let res = match res_id {
+            0 => &mut self.health,
+            1 => &mut self.ammo,
+            _ => return,
+        };
+        *res += amount;
     }
 
     fn resource_value(&self, res_id: usize) -> usize {
-        if res_id != 0 {
-            return 0;
+        match res_id {
+            0 => self.health,
+            1 => self.ammo,
+            _ => return 0,
         }
-        self.ammo
     }
 }
 
