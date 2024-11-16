@@ -1,12 +1,13 @@
-use battle_sim::battle::{PlayerCommand, DEFAULT_COMMAND_DURATION};
+use battle_sim::battle::DEFAULT_COMMAND_DURATION;
 use battle_sim::map_object::MapObject;
 use battle_sim::maptile_logic::MaptileLogic;
 use battle_sim::object_layer::ObjectLayer;
-use battle_sim::player_state::PlayerControl;
 use battle_sim::r#impl::grid_battle::{GridBattle, GridPlayerState};
 use battle_sim::r#impl::grid_map::GridBattleMap;
 use battle_sim::r#impl::grid_map_prober::GridMapProber;
 use battle_sim::r#impl::grid_orientation::GridOrientation;
+use battle_sim::r#impl::simple_command_logic::{PlayerCommand, SimpleBattleLogic};
+use battle_sim::r#impl::trivial_object_layer::TrivialObjectLayer;
 use battle_sim::script_repr::ToScriptRepr;
 use std::collections::HashMap;
 
@@ -71,9 +72,13 @@ where
 fn testtest() {
     let map = GridBattleMap::new(2, 2, SimpleTileType::Nothin, SimpleTileType::Nothin);
     let mut b = GridBattle::new(
-        map,
-        TestTrivialLogic {},
-        GridMapProber {},
+        SimpleBattleLogic::new(
+            map,
+            TestTrivialLogic {},
+            GridMapProber {},
+            TrivialObjectLayer::new(),
+            HashMap::new(),
+        ),
         vec![(
             GridPlayerState::new(0, 0, GridOrientation::Down, 0, 1),
             "\
@@ -83,7 +88,6 @@ fn testtest() {
             "
             .to_owned(),
         )],
-        HashMap::new(),
     );
     b.run_simulation();
     assert_eq!(DEFAULT_COMMAND_DURATION, b.time());
@@ -94,9 +98,17 @@ fn testtest() {
 fn test2players() {
     let map = GridBattleMap::new(2, 2, SimpleTileType::Nothin, SimpleTileType::Nothin);
     let mut b = GridBattle::new(
-        map,
-        TestTrivialLogic {},
-        GridMapProber {},
+        SimpleBattleLogic::new(
+            map,
+            TestTrivialLogic {},
+            GridMapProber {},
+            TrivialObjectLayer::new(),
+            HashMap::from([
+                (PlayerCommand::MoveFwd, 100),
+                (PlayerCommand::TurnCW, 10),
+                (PlayerCommand::MoveFwd, 20),
+            ]),
+        ),
         vec![
             (
                 GridPlayerState::new(0, 0, GridOrientation::Down, 0, 1),
@@ -119,11 +131,6 @@ fn test2players() {
                 .to_owned(),
             ),
         ],
-        HashMap::from([
-            (PlayerCommand::MoveFwd, 100),
-            (PlayerCommand::TurnCW, 10),
-            (PlayerCommand::MoveFwd, 20),
-        ]),
     );
     b.run_simulation();
     assert_eq!(20, b.time());
@@ -139,9 +146,17 @@ fn test2players() {
 fn test_2players_move_into_each_other() {
     let map = GridBattleMap::new(3, 3, SimpleTileType::Nothin, SimpleTileType::Nothin);
     let mut b = GridBattle::new(
-        map,
-        TestTrivialLogic {},
-        GridMapProber {},
+        SimpleBattleLogic::new(
+            map,
+            TestTrivialLogic {},
+            GridMapProber {},
+            TrivialObjectLayer::new(),
+            HashMap::from([
+                (PlayerCommand::MoveFwd, 100),
+                (PlayerCommand::TurnCW, 10),
+                (PlayerCommand::MoveFwd, 20),
+            ]),
+        ),
         vec![
             (
                 GridPlayerState::new(0, 1, GridOrientation::Right, 0, 1),
@@ -158,11 +173,6 @@ fn test_2players_move_into_each_other() {
                 .to_owned(),
             ),
         ],
-        HashMap::from([
-            (PlayerCommand::MoveFwd, 100),
-            (PlayerCommand::TurnCW, 10),
-            (PlayerCommand::MoveFwd, 20),
-        ]),
     );
     b.run_simulation();
     println!(
@@ -185,9 +195,17 @@ fn test_2players_move_into_each_other() {
 fn test_2players_move_past_each_other() {
     let map = GridBattleMap::new(3, 3, SimpleTileType::Nothin, SimpleTileType::Nothin);
     let mut b = GridBattle::new(
-        map,
-        TestTrivialLogic {},
-        GridMapProber {},
+        SimpleBattleLogic::new(
+            map,
+            TestTrivialLogic {},
+            GridMapProber {},
+            TrivialObjectLayer::new(),
+            HashMap::from([
+                (PlayerCommand::MoveFwd, 100),
+                (PlayerCommand::TurnCW, 10),
+                (PlayerCommand::MoveFwd, 20),
+            ]),
+        ),
         vec![
             (
                 GridPlayerState::new(0, 1, GridOrientation::Right, 0, 1),
@@ -204,11 +222,6 @@ fn test_2players_move_past_each_other() {
                 .to_owned(),
             ),
         ],
-        HashMap::from([
-            (PlayerCommand::MoveFwd, 100),
-            (PlayerCommand::TurnCW, 10),
-            (PlayerCommand::MoveFwd, 20),
-        ]),
     );
     b.run_simulation();
     println!(
@@ -231,9 +244,18 @@ fn test_2players_move_past_each_other() {
 fn test_2players_move_into_each_other_but_shoot() {
     let map = GridBattleMap::new(3, 3, SimpleTileType::Nothin, SimpleTileType::Nothin);
     let mut b = GridBattle::new(
-        map,
-        TestTrivialLogic {},
-        GridMapProber {},
+        SimpleBattleLogic::new(
+            map,
+            TestTrivialLogic {},
+            GridMapProber {},
+            TrivialObjectLayer::new(),
+            HashMap::from([
+                (PlayerCommand::MoveFwd, 100),
+                (PlayerCommand::TurnCW, 10),
+                (PlayerCommand::MoveFwd, 20),
+                (PlayerCommand::Shoot, 5),
+            ]),
+        ),
         vec![
             (
                 GridPlayerState::new(0, 1, GridOrientation::Right, 1, 1),
@@ -258,12 +280,6 @@ fn test_2players_move_into_each_other_but_shoot() {
                 .to_owned(),
             ),
         ],
-        HashMap::from([
-            (PlayerCommand::MoveFwd, 100),
-            (PlayerCommand::TurnCW, 10),
-            (PlayerCommand::MoveFwd, 20),
-            (PlayerCommand::Shoot, 5),
-        ]),
     );
     b.run_simulation();
     println!(
@@ -287,9 +303,17 @@ fn test_2players_move_into_each_other_but_shoot() {
 fn test2players_inf_loop() {
     let map = GridBattleMap::new(2, 2, SimpleTileType::Nothin, SimpleTileType::Nothin);
     let mut b = GridBattle::new(
-        map,
-        TestTrivialLogic {},
-        GridMapProber {},
+        SimpleBattleLogic::new(
+            map,
+            TestTrivialLogic {},
+            GridMapProber {},
+            TrivialObjectLayer::new(),
+            HashMap::from([
+                (PlayerCommand::MoveFwd, 100),
+                (PlayerCommand::TurnCW, 10),
+                (PlayerCommand::MoveFwd, 20),
+            ]),
+        ),
         vec![
             (
                 GridPlayerState::new(0, 0, GridOrientation::Down, 0, 1),
@@ -312,11 +336,6 @@ fn test2players_inf_loop() {
                 .to_owned(),
             ),
         ],
-        HashMap::from([
-            (PlayerCommand::MoveFwd, 100),
-            (PlayerCommand::TurnCW, 10),
-            (PlayerCommand::MoveFwd, 20),
-        ]),
     );
     b.run_simulation();
     assert_eq!(20, b.time());
@@ -326,9 +345,17 @@ fn test2players_inf_loop() {
 fn test2players_bad_inf_loop() {
     let map = GridBattleMap::new(2, 2, SimpleTileType::Nothin, SimpleTileType::Nothin);
     let mut b = GridBattle::new(
-        map,
-        TestTrivialLogic {},
-        GridMapProber {},
+        SimpleBattleLogic::new(
+            map,
+            TestTrivialLogic {},
+            GridMapProber {},
+            TrivialObjectLayer::new(),
+            HashMap::from([
+                (PlayerCommand::MoveFwd, 100),
+                (PlayerCommand::TurnCW, 10),
+                (PlayerCommand::MoveFwd, 20),
+            ]),
+        ),
         vec![
             (
                 GridPlayerState::new(0, 0, GridOrientation::Down, 0, 1),
@@ -354,11 +381,6 @@ fn test2players_bad_inf_loop() {
                 .to_owned(),
             ),
         ],
-        HashMap::from([
-            (PlayerCommand::MoveFwd, 100),
-            (PlayerCommand::TurnCW, 10),
-            (PlayerCommand::MoveFwd, 20),
-        ]),
     );
     b.run_simulation();
     assert_eq!(20, b.time());

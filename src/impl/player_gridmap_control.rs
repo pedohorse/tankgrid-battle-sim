@@ -136,8 +136,12 @@ where
         match res_id {
             0 => self.health,
             1 => self.ammo,
-            _ => return 0,
+            _ => 0,
         }
+    }
+
+    fn is_dead(&self) -> bool {
+        self.health <= 0
     }
 }
 

@@ -3,11 +3,12 @@ use std::cmp::Eq;
 use std::collections::HashMap;
 use std::hash::Hash;
 use std::marker::PhantomData;
-use std::sync::mpsc::{Sender, TryRecvError};
+use std::sync::mpsc::{TryRecvError};
 use std::thread;
 use std::time::{self, Duration, Instant};
 use std::{cell::RefCell, rc::Rc, sync::mpsc};
 
+use super::command_logic::BattleLogic;
 use super::gametime::GameTime;
 use super::map::MapReadAccess;
 use super::map_object::MapObject;
@@ -17,8 +18,8 @@ use super::object_layer::ObjectLayer;
 use super::player_state::PlayerControl;
 use super::script_repr::{FromScriptRepr, ToScriptRepr};
 
-use rustpython_vm::convert::ToPyObject;
-use rustpython_vm::{compiler, Interpreter, PyResult, VirtualMachine, signal::{UserSignalReceiver, UserSignalSendError, user_signal_channel}};
+use rustpython_vm::compiler::parser::ast::located::Mod;
+use rustpython_vm::{compiler, Interpreter, PyResult, signal::{UserSignalReceiver, user_signal_channel}};
 
 #[derive(Clone, Copy, PartialEq)]
 pub enum PlayerCommandState<PC> {
@@ -41,123 +42,53 @@ impl<PC> PlayerCommandState<PC> {
     }
 }
 
-#[derive(Clone, Copy, PartialEq, Eq, Hash)]
-pub enum PlayerCommand<R> {
-    MoveFwd,
-    TurnCW,
-    TurnCCW,
-    Shoot,
-    Wait,
-    Look(R),
-    Finish,
-}
-
-#[derive(Clone)]
-pub enum PlayerCommandReply<T>
-where
-    T: Send + 'static,
-{
-    None,
-    Bool(bool),
-    LookResult(Vec<T>),
-}
-
-pub enum ObjectCacheType {
-    Player(usize),
-    //Stuff, // TODO: add stuff like pickable items
-}
-
-pub struct ObjectCacheRepr<R> {
-    obj_type: ObjectCacheType,
-    pos: (i64, i64),
-    rot: R,
-    seethroughable: bool,
-    passable: bool,
-    shootable: bool,
-    script_repr: String,
-}
-
-impl<R> MapObject<R> for ObjectCacheRepr<R>
-where
-    R: Copy,
-{
-    fn orientation(&self) -> R {
-        self.rot
-    }
-
-    fn position(&self) -> (i64, i64) {
-        self.pos
-    }
-
-    fn passable(&self) -> bool {
-        self.passable
-    }
-
-    fn seethroughable(&self) -> bool {
-        self.seethroughable
-    }
-}
-
-impl<R> ToScriptRepr for ObjectCacheRepr<R> {
-    fn to_script_repr(&self) -> String {
-        self.script_repr.clone()
-    }
-}
-
-pub struct Battle<T, M, L, R, P, Pr, OCache>
+pub struct Battle<T, M, L, R, MObj, P, Pr, OLayer, BLogic, PCom, PComRep>
 where
     L: MaptileLogic<T>,
     M: MapReadAccess<T>,
     R: Copy,
-    P: PlayerControl<R, M, T, L, ObjectCacheRepr<R>, OCache>,
-    Pr: MapProber<T, R, M, L, ObjectCacheRepr<R>, OCache>,
-    OCache: ObjectLayer<R, ObjectCacheRepr<R>>,
+    MObj: MapObject<R>,
+    P: PlayerControl<R, M, T, L, MObj, OLayer>,
+    Pr: MapProber<T, R, M, L, MObj, OLayer>,
+    OLayer: ObjectLayer<R, MObj>,
+    BLogic: BattleLogic<T, M, L, R, P, Pr, MObj, OLayer, PCom, PComRep>,
 {
-    map: M,
-    logic: L,
-    map_prober: Pr,
     player_states: Vec<P>,
     player_programs: Vec<String>,
+    battle_logic: BLogic,
     time: GameTime,
-    command_durations: HashMap<PlayerCommand<R>, GameTime>,
-    object_layer: OCache,
-    _marker0: PhantomData<T>,
-    _marker1: PhantomData<R>,
+    _marker: PhantomData<(T, M, L, R, MObj, Pr, OLayer, PCom, PComRep)>,
 }
 
 pub const DEFAULT_COMMAND_DURATION: GameTime = 10;
 pub const VM_THINK_TIMEOUT: time::Duration = time::Duration::from_secs(5);
 
-impl<T, M, L, R, P, Pr, OCache> Battle<T, M, L, R, P, Pr, OCache>
+impl<T, M, L, R, MObj, P, Pr, OLayer, BLogic, PCom, PComRep> Battle<T, M, L, R, MObj, P, Pr, OLayer, BLogic, PCom, PComRep>
 where
     T: Copy + Clone + Send + ToScriptRepr,
     L: MaptileLogic<T>,
     M: MapReadAccess<T>,
     R: Copy + Clone + Eq + Hash + Send + 'static + FromScriptRepr,
-    P: PlayerControl<R, M, T, L, ObjectCacheRepr<R>, OCache> + MapObject<R> + ToScriptRepr,
-    Pr: MapProber<T, R, M, L, ObjectCacheRepr<R>, OCache>,
-    OCache: ObjectLayer<R, ObjectCacheRepr<R>>,
+    MObj: MapObject<R>,
+    P: PlayerControl<R, M, T, L, MObj, OLayer> + MapObject<R> + ToScriptRepr,
+    Pr: MapProber<T, R, M, L, MObj, OLayer>,
+    OLayer: ObjectLayer<R, MObj>,
+    BLogic: BattleLogic<T, M, L, R, P, Pr, MObj, OLayer, PCom, PComRep>,
+    PCom: Hash + Copy + PartialEq + Eq + Send + 'static,
+    PComRep: Send + 'static,
 {
     pub fn new(
-        map: M,
-        logic: L,
-        map_prober: Pr,
+        battle_logic: BLogic,
         player_initial_states_and_programs: Vec<(P, String)>,
-        command_durations: HashMap<PlayerCommand<R>, usize>,
-    ) -> Battle<T, M, L, R, P, Pr, OCache> {
+    ) -> Battle<T, M, L, R, MObj, P, Pr, OLayer, BLogic, PCom, PComRep> {
         let (player_states, player_programs): (Vec<P>, Vec<String>) =
             player_initial_states_and_programs.into_iter().unzip();
         Battle {
-            map,
-            logic,
-            map_prober,
             player_states,
             player_programs,
+            battle_logic,
             time: 0,
-            command_durations,
-            object_layer: OCache::new(),
-            _marker0: PhantomData,
-            _marker1: PhantomData,
+            _marker: PhantomData,
         }
     }
 
@@ -167,10 +98,6 @@ where
 
     pub fn player_state(&self, i: usize) -> &P {
         &self.player_states[i]
-    }
-
-    pub fn map(&self) -> &M {
-        &self.map
     }
 
     pub fn run_simulation(&mut self) {
@@ -196,7 +123,7 @@ where
                 thread_stop_signal_senders.push(Some(thread_stop_sender));
             }
 
-            let mut next_commands: Vec<PlayerCommandState<PlayerCommand<R>>> =
+            let mut next_commands: Vec<PlayerCommandState<PCom>> =
                 vec![PlayerCommandState::None; player_count];
 
             let mut start_timestamps = vec![time::Instant::now(); player_count];
@@ -205,7 +132,7 @@ where
 
                 // check dead
                 for (i, player) in self.player_states.iter().enumerate() {
-                    if player.resource_value(0) <= 0 {
+                    if player.is_dead() {
                         next_commands[i] = PlayerCommandState::Finish;
                     }
                 }
@@ -305,31 +232,9 @@ where
                                 unreachable!(); 
                             };
                             let player_state = &mut self.player_states[player_i];
-                            // duration is based on map modifiers
-                            let duration = if let Some(dur) = self.command_durations.get(com) {
-                                let tile = {
-                                    let (x, y) = player_state.position();
-                                    self.map.get_tile_at(x, y)
-                                };
-                                let speed_percentage = match com {
-                                    PlayerCommand::MoveFwd => {
-                                        self.logic.pass_speed_percentage(tile)
-                                    }
-                                    PlayerCommand::TurnCW | PlayerCommand::TurnCCW => {
-                                        self.logic.turn_speed_percentage(tile)
-                                    }
-                                    _ => 100,
-                                };
-                                // speed = 0 means we misconfigured something
-                                let speed_percentage = if speed_percentage == 0 {
-                                    eprintln!("[WARNING] tile speed == 0, seems like a misconfiguration, ignoring");
-                                    100
-                                } else { speed_percentage };
-
-                                (*dur * 100) / (speed_percentage as usize)
-                            } else {
-                                DEFAULT_COMMAND_DURATION
-                            };
+                            // duration may be based in stats or map modifiers
+                            let duration = self.battle_logic.get_command_duration(&player_state, com);
+                            
                             //
                             (*command_start_gametime + duration - self.time, player_i, k)
                         })
@@ -343,64 +248,8 @@ where
                         //  also we bravely unwrap cuz channels may close only in the start of the loop
                         let reply_channel = &channels[player_i].as_ref().unwrap().1;
 
-                        let reply = match com {
-                            PlayerCommand::MoveFwd => {
-                                self.recreate_objects_layer();
-                                let player_state = &mut self.player_states[player_i];
-                                player_state.move_forward(&mut self.map, &self.logic, &self.object_layer);
-                                // TODO: interact with the object if moved onto one
-                                PlayerCommandReply::None
-                            }
-                            PlayerCommand::TurnCW => {
-                                self.recreate_objects_layer();
-                                let player_state = &mut self.player_states[player_i];
-                                player_state.turn_cw(&mut self.map, &self.logic, &self.object_layer);
-                                PlayerCommandReply::None
-                            }
-                            PlayerCommand::TurnCCW => {
-                                self.recreate_objects_layer();
-                                let player_state = &mut self.player_states[player_i];
-                                player_state.turn_ccw(&mut self.map, &self.logic, &self.object_layer);
-                                PlayerCommandReply::None
-                            }
-                            PlayerCommand::Shoot => {
-                                let player_state = &mut self.player_states[player_i];
-                                if player_state.resource_value(1) > 0 {
-                                    player_state.expend_resource(1, 1);
-                                    self.recreate_objects_layer();
-                                    let player_state = &mut self.player_states[player_i];
-                                    if let Some((hit_x, hit_y)) = self.map_prober.raycast(player_state.position(), &self.map, &self.logic, &self.object_layer, player_state.orientation(), true, false, true) {
-                                        for obj_ref in self.object_layer.objects_at(hit_x, hit_y).into_iter() {
-                                            if !obj_ref.shootable() {
-                                                continue;
-                                            }
-                                            match obj_ref.obj_type {
-                                                ObjectCacheType::Player(other_player_i) => {
-                                                    let hit_enemy = &mut self.player_states[other_player_i];
-                                                    hit_enemy.expend_resource(0, 1);
-                                                }
-                                            }
-                                        }
-                                    };
-                                }
+                        let reply = self.battle_logic.process_commands(player_i, com, &mut self.player_states);
 
-                                PlayerCommandReply::None
-                            }
-                            PlayerCommand::Wait => {
-                                PlayerCommandReply::None
-                            }
-                            PlayerCommand::Look(ori) => {
-                                self.recreate_objects_layer();
-                                let look_result = self.map_prober.look(self.player_states[player_i].position(), &self.map, &self.logic, &self.object_layer, ori).into_iter().map(|(t, maybe_obj)| {
-                                    (t.to_script_repr(), maybe_obj.map(|obj| {obj.to_script_repr()}))
-                                }).collect();
-
-                                PlayerCommandReply::LookResult(look_result)
-                            }
-                            PlayerCommand::Finish => {
-                                unreachable!();
-                            }
-                        };
                         // send reply
                         if let Err(_) = reply_channel.send(reply) {
                             println!("failed to send reply to the player");
@@ -448,8 +297,8 @@ where
     /// returns success or error if code produced an exception
     fn program_runner(
         program: String,
-        command_channel: mpsc::Sender<PlayerCommand<R>>,
-        reply_channel: mpsc::Receiver<PlayerCommandReply<(String, Option<String>)>>,
+        command_channel: mpsc::Sender<PCom>,
+        reply_channel: mpsc::Receiver<PComRep>,  // PlayerCommandReply<(String, Option<String>)>
         vm_signal_receiver: UserSignalReceiver,
     ) -> Result<(), ()> {
         macro_rules! send_command {
@@ -457,22 +306,26 @@ where
                 let command_channel = if let Some(x) = $command_channel.upgrade() {
                     x
                 } else {
-                    return PyResult::Err($vm.new_runtime_error("game is closed!".to_owned()));
+                    return Err(())
+                    //return PyResult::Err($vm.new_runtime_error("game is closed!".to_owned()));
                 };
                 let reply_channel = if let Some(x) = $reply_channel.upgrade() {
                     x
                 } else {
-                    return PyResult::Err($vm.new_runtime_error("game is closed!".to_owned()));
+                    return Err(())
+                    //return PyResult::Err($vm.new_runtime_error("game is closed!".to_owned()));
                 };
 
                 if let Err(_) = command_channel.borrow().send($cmd) {
-                    return PyResult::Err($vm.new_runtime_error("game is closed!".to_owned()));
+                    return Err(())
+                    //return PyResult::Err($vm.new_runtime_error("game is closed!".to_owned()));
                 };
 
                 let ret = match reply_channel.borrow().recv() {
-                    Ok(x) => x,
+                    Ok(x) => Ok(x),
                     Err(_) => {
-                        return PyResult::Err($vm.new_runtime_error("game is closed!!".to_owned()));
+                        Err(())
+                        //return PyResult::Err($vm.new_runtime_error("game is closed!!".to_owned()));
                     }
                 };
                 ret
@@ -487,98 +340,16 @@ where
         });
         let ret = interpreter.enter(|vm| {
             let scope = vm.new_scope_with_builtins();
-
-            macro_rules! add_function {
-                ($fname:literal, $fn:block) => {
-                    scope
-                        .globals
-                        .set_item($fname, vm.new_function($fname, $fn).into(), vm)
-                        .unwrap();
-                };
-            }
-
-            add_function!("turn_cw", {
-                // TODO: figure out why do I have to downgrade refs?
-                //  it's as if interpreter is not dropped properly and keeps refs
+            
+            BLogic::initialize_scope(vm, &scope, 
+                {
                 let reply_channel = Rc::downgrade(&reply_channel);
                 let command_channel = Rc::downgrade(&command_channel);
-                move |vm: &VirtualMachine| -> PyResult<()> {
-                    println!("TEST: turn_cw");
-                    let _ret =
-                        send_command!(vm, command_channel, reply_channel, PlayerCommand::TurnCW);
-                    PyResult::Ok(())
+                move |com: PCom| -> Result<PComRep, ()> {
+                    send_command!(vm, command_channel, reply_channel, com)
                 }
-            });
-            add_function!("turn_ccw", {
-                let reply_channel = Rc::downgrade(&reply_channel);
-                let command_channel = Rc::downgrade(&command_channel);
-                move |vm: &VirtualMachine| -> PyResult<()> {
-                    println!("TEST: turn_ccw");
-                    let _ret =
-                        send_command!(vm, command_channel, reply_channel, PlayerCommand::TurnCCW);
-                    PyResult::Ok(())
                 }
-            });
-            add_function!("move_forward", {
-                let reply_channel = Rc::downgrade(&reply_channel);
-                let command_channel = Rc::downgrade(&command_channel);
-                move |vm: &VirtualMachine| -> PyResult<()> {
-                    println!("TEST: move_forward");
-                    let _ret =
-                        send_command!(vm, command_channel, reply_channel, PlayerCommand::MoveFwd);
-                    PyResult::Ok(())
-                }
-            });
-            add_function!("shoot", {
-                let reply_channel = Rc::downgrade(&reply_channel);
-                let command_channel = Rc::downgrade(&command_channel);
-                move |vm: &VirtualMachine| -> PyResult<()> {
-                    println!("TEST: shoot");
-                    let _ret =
-                        send_command!(vm, command_channel, reply_channel, PlayerCommand::Shoot);
-                    PyResult::Ok(())
-                }
-            });
-            add_function!("wait", {
-                let reply_channel = Rc::downgrade(&reply_channel);
-                let command_channel = Rc::downgrade(&command_channel);
-                move |vm: &VirtualMachine| -> PyResult<()> {
-                    println!("TEST: wait");
-                    let _ret =
-                        send_command!(vm, command_channel, reply_channel, PlayerCommand::Wait);
-                    PyResult::Ok(())
-                }
-            });
-            add_function!("look", {
-                let reply_channel = Rc::downgrade(&reply_channel);
-                let command_channel = Rc::downgrade(&command_channel);
-                move |direction: String, vm: &VirtualMachine| -> PyResult<_> {
-                    println!("TEST: look");
-                    let direction = if let Some(x) = R::from_script_repr(&direction) {
-                        x
-                    } else {
-                        return PyResult::Err(
-                            vm.new_runtime_error("bad direction value".to_owned()),
-                        );
-                    };
-                    let ret = send_command!(
-                        vm,
-                        command_channel,
-                        reply_channel,
-                        PlayerCommand::Look(direction)
-                    );
-                    if let PlayerCommandReply::LookResult(look_result) = ret {
-                        PyResult::Ok(
-                            look_result
-                                .into_iter()
-                                .map(|t| t.to_pyobject(&vm))
-                                .collect::<Vec<_>>(),
-                        )
-                    } else {
-                        PyResult::Err(vm.new_runtime_error("unexpected look reply".to_owned()))
-                    }
-                }
-            });
+            );
 
             let code_obj = match vm.compile(&program, compiler::Mode::Exec, "<embedded>".to_owned())
             {
@@ -595,24 +366,5 @@ where
         interpreter.finalize(None);
         println!("program runner completed");
         ret
-    }
-
-    fn recreate_objects_layer(&mut self) {
-        self.object_layer.clear();
-        for (i, player) in self.player_states.iter().enumerate() {
-            if player.resource_value(0) <= 0 {
-                // if dead (TODO: may spawn a corpse object instead)
-                continue;
-            }
-            self.object_layer.add(ObjectCacheRepr {
-                obj_type: ObjectCacheType::Player(i),
-                pos: player.position(),
-                rot: player.orientation(),
-                seethroughable: player.seethroughable(),
-                passable: player.passable(),
-                shootable: player.shootable(),
-                script_repr: player.to_script_repr(),
-            });
-        }
     }
 }

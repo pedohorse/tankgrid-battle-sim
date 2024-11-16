@@ -5,5 +5,6 @@ pub mod grid_map_prober;
 pub mod grid_orientation;
 pub mod gridmap_from_file;
 pub mod player_gridmap_control;
+pub mod simple_command_logic;
 pub mod tile_types;
 pub mod trivial_object_layer;
