@@ -2,25 +2,17 @@ use battle_sim::battle::DEFAULT_COMMAND_DURATION;
 use battle_sim::map_object::MapObject;
 use battle_sim::maptile_logic::MaptileLogic;
 use battle_sim::object_layer::ObjectLayer;
+use battle_sim::player_state::PlayerControl;
 use battle_sim::r#impl::grid_battle::{GridBattle, GridPlayerState};
 use battle_sim::r#impl::grid_map::GridBattleMap;
 use battle_sim::r#impl::grid_map_prober::GridMapProber;
 use battle_sim::r#impl::grid_orientation::GridOrientation;
 use battle_sim::r#impl::simple_command_logic::{PlayerCommand, SimpleBattleLogic};
 use battle_sim::r#impl::trivial_object_layer::TrivialObjectLayer;
-use battle_sim::script_repr::ToScriptRepr;
 use std::collections::HashMap;
 
-#[derive(Clone, Copy)]
-enum SimpleTileType {
-    Nothin,
-}
-
-impl ToScriptRepr for SimpleTileType {
-    fn to_script_repr(&self) -> String {
-        "empty_tile".to_owned()
-    }
-}
+mod common;
+use common::{SimpleTileType, VecLogWriter};
 
 struct TestTrivialLogic {}
 
@@ -71,6 +63,7 @@ where
 #[test]
 fn testtest() {
     let map = GridBattleMap::new(2, 2, SimpleTileType::Nothin, SimpleTileType::Nothin);
+    let logger = VecLogWriter::new();
     let mut b = GridBattle::new(
         SimpleBattleLogic::new(
             map,
@@ -80,7 +73,7 @@ fn testtest() {
             HashMap::new(),
         ),
         vec![(
-            GridPlayerState::new(0, 0, GridOrientation::Down, 0, 1),
+            GridPlayerState::new(0, 0, GridOrientation::Down, 0, 1, "player1"),
             "\
             print('hell-o')\n\
             turn_cw()\n\
@@ -88,6 +81,7 @@ fn testtest() {
             "
             .to_owned(),
         )],
+        logger,
     );
     b.run_simulation();
     assert_eq!(DEFAULT_COMMAND_DURATION, b.time());
@@ -97,6 +91,7 @@ fn testtest() {
 #[test]
 fn test2players() {
     let map = GridBattleMap::new(2, 2, SimpleTileType::Nothin, SimpleTileType::Nothin);
+    let logger = VecLogWriter::new();
     let mut b = GridBattle::new(
         SimpleBattleLogic::new(
             map,
@@ -111,7 +106,7 @@ fn test2players() {
         ),
         vec![
             (
-                GridPlayerState::new(0, 0, GridOrientation::Down, 0, 1),
+                GridPlayerState::new(0, 0, GridOrientation::Down, 0, 1, "player1"),
                 "\
                 print('hell-o')\n\
                 turn_cw()\n\
@@ -122,7 +117,7 @@ fn test2players() {
                 .to_owned(),
             ),
             (
-                GridPlayerState::new(2, 2, GridOrientation::Up, 0, 1),
+                GridPlayerState::new(2, 2, GridOrientation::Up, 0, 1, "player2"),
                 "\
                 print('second')\n\
                 move_forward()\n\
@@ -131,6 +126,7 @@ fn test2players() {
                 .to_owned(),
             ),
         ],
+        logger
     );
     b.run_simulation();
     assert_eq!(20, b.time());
@@ -140,11 +136,14 @@ fn test2players() {
     assert_eq!(0, b.player_state(0).col);
     assert_eq!(1, b.player_state(1).row);
     assert_eq!(2, b.player_state(1).col);
+    assert!(!b.player_state(0).is_dead());
+    assert!(!b.player_state(1).is_dead());
 }
 
 #[test]
 fn test_2players_move_into_each_other() {
     let map = GridBattleMap::new(3, 3, SimpleTileType::Nothin, SimpleTileType::Nothin);
+    let logger = VecLogWriter::new();
     let mut b = GridBattle::new(
         SimpleBattleLogic::new(
             map,
@@ -159,20 +158,21 @@ fn test_2players_move_into_each_other() {
         ),
         vec![
             (
-                GridPlayerState::new(0, 1, GridOrientation::Right, 0, 1),
+                GridPlayerState::new(0, 1, GridOrientation::Right, 0, 1, "player1"),
                 "\
                 move_forward()\n\
                 "
                 .to_owned(),
             ),
             (
-                GridPlayerState::new(2, 1, GridOrientation::Left, 0, 1),
+                GridPlayerState::new(2, 1, GridOrientation::Left, 0, 1, "player2"),
                 "\
                 move_forward()\n\
                 "
                 .to_owned(),
             ),
         ],
+        logger
     );
     b.run_simulation();
     println!(
@@ -189,11 +189,14 @@ fn test_2players_move_into_each_other() {
     assert_eq!(1, b.player_state(0).row);
     assert_eq!(1, b.player_state(1).row);
     assert!(b.player_state(0).col != b.player_state(1).col);
+    assert!(!b.player_state(0).is_dead());
+    assert!(!b.player_state(1).is_dead());
 }
 
 #[test]
 fn test_2players_move_past_each_other() {
     let map = GridBattleMap::new(3, 3, SimpleTileType::Nothin, SimpleTileType::Nothin);
+    let logger = VecLogWriter::new();
     let mut b = GridBattle::new(
         SimpleBattleLogic::new(
             map,
@@ -208,20 +211,21 @@ fn test_2players_move_past_each_other() {
         ),
         vec![
             (
-                GridPlayerState::new(0, 1, GridOrientation::Right, 0, 1),
+                GridPlayerState::new(0, 1, GridOrientation::Right, 0, 1, "player1"),
                 "\
                 move_forward()\n\
                 "
                 .to_owned(),
             ),
             (
-                GridPlayerState::new(2, 2, GridOrientation::Left, 0, 1),
+                GridPlayerState::new(2, 2, GridOrientation::Left, 0, 1, "player2"),
                 "\
                 move_forward()\n\
                 "
                 .to_owned(),
             ),
         ],
+        logger
     );
     b.run_simulation();
     println!(
@@ -237,12 +241,15 @@ fn test_2players_move_past_each_other() {
     assert_eq!(GridOrientation::Left, b.player_state(1).orientation);
     assert_eq!(1, b.player_state(0).row);
     assert_eq!(2, b.player_state(1).row);
-    assert!(b.player_state(0).col == b.player_state(1).col)
+    assert!(b.player_state(0).col == b.player_state(1).col);
+    assert!(!b.player_state(0).is_dead());
+    assert!(!b.player_state(1).is_dead());
 }
 
 #[test]
 fn test_2players_move_into_each_other_but_shoot() {
     let map = GridBattleMap::new(3, 3, SimpleTileType::Nothin, SimpleTileType::Nothin);
+    let logger = VecLogWriter::new();
     let mut b = GridBattle::new(
         SimpleBattleLogic::new(
             map,
@@ -258,7 +265,7 @@ fn test_2players_move_into_each_other_but_shoot() {
         ),
         vec![
             (
-                GridPlayerState::new(0, 1, GridOrientation::Right, 1, 1),
+                GridPlayerState::new(0, 1, GridOrientation::Right, 1, 1, "player1"),
                 "\
                 print('p0 move')\n\
                 move_forward()\n\
@@ -267,7 +274,7 @@ fn test_2players_move_into_each_other_but_shoot() {
                 .to_owned(),
             ),
             (
-                GridPlayerState::new(2, 1, GridOrientation::Left, 1, 1),
+                GridPlayerState::new(2, 1, GridOrientation::Left, 1, 1, "player2"),
                 "\
                 print('p1 shoot')\n\
                 shoot()\n\
@@ -280,6 +287,7 @@ fn test_2players_move_into_each_other_but_shoot() {
                 .to_owned(),
             ),
         ],
+        logger
     );
     b.run_simulation();
     println!(
@@ -297,11 +305,14 @@ fn test_2players_move_into_each_other_but_shoot() {
     assert_eq!(1, b.player_state(0).row);
     assert_eq!(0, b.player_state(0).col);
     assert_eq!(1, b.player_state(1).row);
+    assert!(b.player_state(0).is_dead());
+    assert!(!b.player_state(1).is_dead());
 }
 
 #[test]
 fn test2players_inf_loop() {
     let map = GridBattleMap::new(2, 2, SimpleTileType::Nothin, SimpleTileType::Nothin);
+    let logger = VecLogWriter::new();
     let mut b = GridBattle::new(
         SimpleBattleLogic::new(
             map,
@@ -316,7 +327,7 @@ fn test2players_inf_loop() {
         ),
         vec![
             (
-                GridPlayerState::new(0, 0, GridOrientation::Down, 0, 1),
+                GridPlayerState::new(0, 0, GridOrientation::Down, 0, 1, "player1"),
                 "\
                 print('hell-o')\n\
                 turn_cw()\n\
@@ -327,7 +338,7 @@ fn test2players_inf_loop() {
                 .to_owned(),
             ),
             (
-                GridPlayerState::new(2, 2, GridOrientation::Up, 0, 1),
+                GridPlayerState::new(2, 2, GridOrientation::Up, 0, 1, "[;ayer2"),
                 "\
                 print('second loops')\n\
                 while True:
@@ -336,6 +347,7 @@ fn test2players_inf_loop() {
                 .to_owned(),
             ),
         ],
+        logger
     );
     b.run_simulation();
     assert_eq!(20, b.time());
@@ -344,6 +356,7 @@ fn test2players_inf_loop() {
 #[test]
 fn test2players_bad_inf_loop() {
     let map = GridBattleMap::new(2, 2, SimpleTileType::Nothin, SimpleTileType::Nothin);
+    let logger = VecLogWriter::new();
     let mut b = GridBattle::new(
         SimpleBattleLogic::new(
             map,
@@ -358,7 +371,7 @@ fn test2players_bad_inf_loop() {
         ),
         vec![
             (
-                GridPlayerState::new(0, 0, GridOrientation::Down, 0, 1),
+                GridPlayerState::new(0, 0, GridOrientation::Down, 0, 1, "player1"),
                 "\
                 print('hell-o')\n\
                 turn_cw()\n\
@@ -369,7 +382,7 @@ fn test2players_bad_inf_loop() {
                 .to_owned(),
             ),
             (
-                GridPlayerState::new(2, 2, GridOrientation::Up, 0, 1),
+                GridPlayerState::new(2, 2, GridOrientation::Up, 0, 1, "player2"),
                 "\
                 print('second loops')\n\
                 while True:
@@ -381,6 +394,7 @@ fn test2players_bad_inf_loop() {
                 .to_owned(),
             ),
         ],
+        logger
     );
     b.run_simulation();
     assert_eq!(20, b.time());

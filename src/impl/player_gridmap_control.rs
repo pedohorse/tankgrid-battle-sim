@@ -1,9 +1,7 @@
-use crate::map::MapReadAccess;
 use crate::map_object::MapObject;
-use crate::maptile_logic::MaptileLogic;
-use crate::object_layer::ObjectLayer;
 use crate::player_state::PlayerControl;
 use crate::script_repr::ToScriptRepr;
+use crate::log_data::LogRepresentable;
 
 use super::grid_orientation::GridOrientation;
 //use super::tile_types::TileType;
@@ -15,6 +13,7 @@ pub struct GridPlayerState {
     pub orientation: GridOrientation,
     pub ammo: usize,
     pub health: usize,
+    pub name: String,
 }
 
 impl GridPlayerState {
@@ -24,6 +23,7 @@ impl GridPlayerState {
         orientation: GridOrientation,
         ammo: usize,
         health: usize,
+        name: &str,
     ) -> GridPlayerState {
         GridPlayerState {
             row,
@@ -31,55 +31,29 @@ impl GridPlayerState {
             orientation,
             ammo,
             health,
+            name: name.to_owned(),
         }
     }
 }
 
-impl<T, C, M, MObj, OL> PlayerControl<GridOrientation, M, T, C, MObj, OL> for GridPlayerState
-where
-    C: MaptileLogic<T>,
-    M: MapReadAccess<T>,
-    MObj: MapObject<GridOrientation>,
-    OL: ObjectLayer<GridOrientation, MObj>,
+impl PlayerControl for GridPlayerState
 {
-    fn move_forward(&mut self, map: &mut M, logic: &C, object_layer: &OL) {
+    fn forward_pos(&self) -> (i64, i64) {
         match self.orientation {
-            GridOrientation::Up => {
-                let tile = map.get_tile_at(self.col, self.row - 1);
-                if logic.passable(tile)
-                    && object_layer.objects_at_are_passable(self.col, self.row - 1)
-                {
-                    self.row -= 1;
-                }
-            }
-            GridOrientation::Right => {
-                let tile = map.get_tile_at(self.col + 1, self.row);
-                if logic.passable(tile)
-                    && object_layer.objects_at_are_passable(self.col + 1, self.row)
-                {
-                    self.col += 1;
-                }
-            }
-            GridOrientation::Down => {
-                let tile = map.get_tile_at(self.col, self.row + 1);
-                if logic.passable(tile)
-                    && object_layer.objects_at_are_passable(self.col, self.row + 1)
-                {
-                    self.row += 1;
-                }
-            }
-            GridOrientation::Left => {
-                let tile = map.get_tile_at(self.col - 1, self.row);
-                if logic.passable(tile)
-                    && object_layer.objects_at_are_passable(self.col - 1, self.row)
-                {
-                    self.col -= 1;
-                }
-            }
+            GridOrientation::Up => (self.col, self.row - 1),
+            GridOrientation::Right => (self.col + 1, self.row),
+            GridOrientation::Down => (self.col, self.row + 1),
+            GridOrientation::Left => (self.col - 1, self.row),
         }
     }
 
-    fn turn_cw(&mut self, _map: &mut M, _logic: &C, _object_layer: &OL) {
+    fn move_forward(&mut self) {
+        let (x, y) = self.forward_pos();
+        self.col = x;
+        self.row = y;
+    }
+
+    fn turn_cw(&mut self) {
         match self.orientation {
             GridOrientation::Up => {
                 self.orientation = GridOrientation::Right;
@@ -96,7 +70,7 @@ where
         }
     }
 
-    fn turn_ccw(&mut self, _map: &mut M, _logic: &C, _object_layer: &OL) {
+    fn turn_ccw(&mut self) {
         match self.orientation {
             GridOrientation::Up => {
                 self.orientation = GridOrientation::Left;
@@ -158,5 +132,15 @@ impl MapObject<GridOrientation> for GridPlayerState {
 impl ToScriptRepr for GridPlayerState {
     fn to_script_repr(&self) -> String {
         "enemy".to_owned()
+    }
+}
+
+impl LogRepresentable for GridPlayerState {
+    fn log_repr(&self) -> String {
+        self.name.to_owned()
+    }
+
+    fn to_log_repr(self) -> String {
+        self.name.to_owned()
     }
 }

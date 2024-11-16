@@ -1,4 +1,5 @@
 use crate::script_repr::FromScriptRepr;
+use crate::log_data::LogRepresentable;
 
 //Copy + Clone + Eq + Hash + Send + 'static + From<String>
 #[derive(PartialEq, Eq, Debug, Clone, Copy, Hash)]
@@ -18,5 +19,16 @@ impl FromScriptRepr for GridOrientation {
             "left"|"west" => Some(GridOrientation::Left),
             _ => None
         }
+    }
+}
+
+impl LogRepresentable for GridOrientation {
+    fn log_repr(&self) -> String {
+        match self {
+            GridOrientation::Up => "up",
+            GridOrientation::Right => "right",
+            GridOrientation::Down => "down",
+            GridOrientation::Left => "left",
+        }.to_owned()
     }
 }

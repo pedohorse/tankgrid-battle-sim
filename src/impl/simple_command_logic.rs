@@ -1,5 +1,6 @@
 use crate::command_logic::BattleLogic;
 use crate::gametime::GameTime;
+use crate::log_data::LogRepresentable;
 use crate::map::MapReadAccess;
 use crate::map_object::MapObject;
 use crate::map_prober::MapProber;
@@ -10,7 +11,6 @@ use crate::script_repr::{FromScriptRepr, ToScriptRepr};
 use std::collections::HashMap;
 use std::hash::Hash;
 use std::marker::PhantomData;
-use std::rc::Rc;
 
 use rustpython_vm::convert::ToPyObject;
 use rustpython_vm::scope::Scope;
@@ -26,7 +26,20 @@ pub enum PlayerCommand<R> {
     Shoot,
     Wait,
     Look(R),
-    Finish,
+}
+
+impl<R> LogRepresentable for PlayerCommand<R>
+where R: LogRepresentable {
+    fn log_repr(&self) -> String {
+        match self {
+            PlayerCommand::MoveFwd => "move-forward".to_owned(),
+            PlayerCommand::TurnCW => "turn-cw".to_owned(),
+            PlayerCommand::TurnCCW => "turn-ccw".to_owned(),
+            PlayerCommand::Shoot => "shoot".to_owned(),
+            PlayerCommand::Wait => "wait".to_owned(),
+            PlayerCommand::Look(dir) => format!("look({}", dir.log_repr()),
+        }
+    }
 }
 
 #[derive(Clone)]
@@ -95,8 +108,7 @@ where
     _marker1: PhantomData<T>,
 }
 
-impl<T, M, L, R, P, Pr, OLayer>
-    BattleLogic<T, M, L, R, P, Pr, ObjectCacheRepr<R>, OLayer, PlayerCommand<R>, PlayerCommandReply>
+impl<T, M, L, R, P, Pr, OLayer> BattleLogic<P, PlayerCommand<R>, PlayerCommandReply>
     for SimpleBattleLogic<T, M, L, Pr, R, OLayer>
 where
     T: Copy + Clone + Send + ToScriptRepr,
@@ -104,7 +116,7 @@ where
     M: MapReadAccess<T>,
     R: Copy + Clone + Eq + Hash + Send + 'static + FromScriptRepr,
     OLayer: ObjectLayer<R, ObjectCacheRepr<R>>,
-    P: PlayerControl<R, M, T, L, ObjectCacheRepr<R>, OLayer> + MapObject<R> + ToScriptRepr,
+    P: PlayerControl + MapObject<R> + ToScriptRepr,
     Pr: MapProber<T, R, M, L, ObjectCacheRepr<R>, OLayer>,
 {
     fn process_commands(
@@ -117,20 +129,29 @@ where
             PlayerCommand::MoveFwd => {
                 self.recreate_objects_layer(player_states);
                 let player_state = &mut player_states[player_i];
-                player_state.move_forward(&mut self.map, &self.logic, &self.object_layer);
+
+                let (fwd_pos_x, fwd_pos_y) = player_state.forward_pos();
+                let tile = self.map.get_tile_at(fwd_pos_x, fwd_pos_y);
+                if self.logic.passable(tile)
+                    && self
+                        .object_layer
+                        .objects_at_are_passable(fwd_pos_x, fwd_pos_y)
+                {
+                    player_state.move_forward();
+                }
                 // TODO: interact with the object if moved onto one
                 PlayerCommandReply::None
             }
             PlayerCommand::TurnCW => {
                 self.recreate_objects_layer(player_states);
                 let player_state = &mut player_states[player_i];
-                player_state.turn_cw(&mut self.map, &self.logic, &self.object_layer);
+                player_state.turn_cw();
                 PlayerCommandReply::None
             }
             PlayerCommand::TurnCCW => {
                 self.recreate_objects_layer(player_states);
                 let player_state = &mut player_states[player_i];
-                player_state.turn_ccw(&mut self.map, &self.logic, &self.object_layer);
+                player_state.turn_ccw();
                 PlayerCommandReply::None
             }
             PlayerCommand::Shoot => {
@@ -168,7 +189,8 @@ where
             PlayerCommand::Wait => PlayerCommandReply::None,
             PlayerCommand::Look(ori) => {
                 self.recreate_objects_layer(player_states);
-                let look_result = self.map_prober
+                let look_result = self
+                    .map_prober
                     .look(
                         player_states[player_i].position(),
                         &self.map,
@@ -186,9 +208,6 @@ where
                     .collect();
 
                 PlayerCommandReply::LookResult(look_result)
-            }
-            PlayerCommand::Finish => {
-                unreachable!();
             }
         }
     }
@@ -333,8 +352,7 @@ where
 
     fn recreate_objects_layer<P>(&mut self, player_states: &[P])
     where
-        P: PlayerControl<R, M, T, L, ObjectCacheRepr<R>, OLayer> + MapObject<R> + ToScriptRepr,
-        
+        P: PlayerControl + MapObject<R> + ToScriptRepr,
     {
         self.object_layer.clear();
         for (i, player) in player_states.iter().enumerate() {

@@ -1,4 +1,3 @@
-use super::grid_map::GridBattleMap;
 use super::grid_orientation::GridOrientation;
 use crate::map::MapReadAccess;
 use crate::map_object::MapObject;

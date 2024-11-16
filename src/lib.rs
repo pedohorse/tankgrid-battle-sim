@@ -9,3 +9,4 @@ pub mod maptile_logic;
 pub mod object_layer;
 pub mod player_state;
 pub mod script_repr;
+pub mod log_data;

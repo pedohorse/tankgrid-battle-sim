@@ -1,12 +1,5 @@
-use super::map::MapReadAccess;
 use super::map_object::MapObject;
-use super::maptile_logic::MaptileLogic;
 use super::object_layer::ObjectLayer;
-
-// pub enum TileOrObject<T, MObj> {
-//     Tile(T),
-//     Object(MObj),
-// }
 
 pub trait MapProber<T, R, M, L, MObj, OL>
 where
@@ -29,7 +22,7 @@ where
     /// since we don't know what user script is going to do with the look result -
     /// there is no point not o alloc it from the very start - it will be moved into
     /// player's vm anyway
-    /// 
+    ///
     /// result is a tuple of tile type and first object on it if any
     fn look<'a>(
         &self,
