@@ -1,3 +1,4 @@
+use std::mem;
 use std::cmp::Eq;
 use std::collections::HashMap;
 use std::hash::Hash;
@@ -18,6 +19,27 @@ use super::script_repr::{FromScriptRepr, ToScriptRepr};
 
 use rustpython_vm::convert::ToPyObject;
 use rustpython_vm::{compiler, Interpreter, PyResult, VirtualMachine, signal::{UserSignalReceiver, UserSignalSendError, user_signal_channel}};
+
+#[derive(Clone, Copy, PartialEq)]
+pub enum PlayerCommandState<PC> {
+    None,
+    GotCommand(PC, GameTime),
+    Finish,
+}
+
+impl<PC> PlayerCommandState<PC> {
+    pub fn take(&mut self) -> PlayerCommandState<PC> {
+        mem::replace(self, PlayerCommandState::None)
+    }
+
+    pub fn unwrap(self) -> (PC, GameTime) {
+        if let PlayerCommandState::GotCommand(c, t) = self {
+            (c ,t)
+        } else {
+            panic!("unwrap failed!");
+        }
+    }
+}
 
 #[derive(Clone, Copy, PartialEq, Eq, Hash)]
 pub enum PlayerCommand<R> {
@@ -174,8 +196,8 @@ where
                 thread_stop_signal_senders.push(Some(thread_stop_sender));
             }
 
-            let mut next_commands: Vec<Option<(PlayerCommand<R>, GameTime)>> =
-                vec![None; player_count];
+            let mut next_commands: Vec<PlayerCommandState<PlayerCommand<R>>> =
+                vec![PlayerCommandState::None; player_count];
 
             let mut start_timestamps = vec![time::Instant::now(); player_count];
             loop {
@@ -184,7 +206,7 @@ where
                 // check dead
                 for (i, player) in self.player_states.iter().enumerate() {
                     if player.resource_value(0) <= 0 {
-                        next_commands[i] = Some((PlayerCommand::Finish, self.time));
+                        next_commands[i] = PlayerCommandState::Finish;
                     }
                 }
 
@@ -192,23 +214,23 @@ where
                     let (command_receiver, _) = if let Some(x) = channels_maybe {
                         x
                     } else {
-                        next_commands[i] = Some((PlayerCommand::Finish, self.time));
+                        next_commands[i] = PlayerCommandState::Finish;
                         players_that_have_commands += 1;
                         continue;
                     };
-                    if let Some(_) = next_commands[i] {
+                    if let PlayerCommandState::GotCommand(_, _) = next_commands[i] {
                         players_that_have_commands += 1;
                         continue;
                     }
 
                     match command_receiver.try_recv() {
                         Ok(com) => {
-                            next_commands[i] = Some((com, self.time));
+                            next_commands[i] = PlayerCommandState::GotCommand(com, self.time);
                             players_that_have_commands += 1;
                             continue;
                         }
                         Err(TryRecvError::Disconnected) => {
-                            next_commands[i] = Some((PlayerCommand::Finish, self.time));
+                            next_commands[i] = PlayerCommandState::Finish;
                             players_that_have_commands += 1;
                             continue;
                         }
@@ -217,7 +239,7 @@ where
                     // so we are still waiting for a command
                     // check for timeout
                     if time::Instant::now() - start_timestamps[i] > VM_THINK_TIMEOUT {
-                        next_commands[i] = Some((PlayerCommand::Finish, self.time));
+                        next_commands[i] = PlayerCommandState::Finish;
                         players_that_have_commands += 1;
                     }
                 }
@@ -226,7 +248,7 @@ where
                 // ensure closed channels for Finished players
                 for (i, ((next_command, channel), thread_stop_signal_sender)) in next_commands.iter().zip(channels.iter_mut()).zip(thread_stop_signal_senders.iter_mut()).enumerate() {
                     match (next_command, &channel) {
-                        (Some((PlayerCommand::Finish, _)), Some(_)) => {
+                        (PlayerCommandState::Finish, Some(_)) => {
                             channel.take();
                             // need to kill thread...
                             if let Some(chan) = thread_stop_signal_sender.take() {
@@ -257,7 +279,7 @@ where
                     // first check if all done
                     if next_commands
                         .iter()
-                        .all(|x| PlayerCommand::Finish == x.unwrap().0)
+                        .all(|x| PlayerCommandState::Finish == *x)
                     {
                         break;
                     }
@@ -268,7 +290,7 @@ where
                         .enumerate()
                         .filter(|(_, k)| {
                             // filter out Finish commands
-                            if let (PlayerCommand::Finish, _) = k.as_ref().unwrap() {
+                            if let PlayerCommandState::Finish = k {
                                 false
                             } else {
                                 true
@@ -276,7 +298,12 @@ where
                         })
                         .map(|(player_i, k)| {
                             // calc remaining duration and other useful things
-                            let (com, command_start_gametime) = k.as_ref().unwrap();
+                            let (com, command_start_gametime) = if let PlayerCommandState::GotCommand(x, y) = k {
+                                (x, y)
+                            } else {
+                                // filter above must have filtered Finish out, and None must not happen cuz of prev logic
+                                unreachable!(); 
+                            };
                             let player_state = &mut self.player_states[player_i];
                             // duration is based on map modifiers
                             let duration = if let Some(dur) = self.command_durations.get(com) {
@@ -304,7 +331,7 @@ where
                                 DEFAULT_COMMAND_DURATION
                             };
                             //
-                            (command_start_gametime + duration - self.time, player_i, k)
+                            (*command_start_gametime + duration - self.time, player_i, k)
                         })
                         .min_by_key(|k| k.0)
                     {
@@ -378,7 +405,7 @@ where
                         if let Err(_) = reply_channel.send(reply) {
                             println!("failed to send reply to the player");
                             // consider player broken
-                            *next_command = Some((PlayerCommand::Finish, self.time));
+                            *next_command = PlayerCommandState::Finish;
                             continue;
                         }
 
