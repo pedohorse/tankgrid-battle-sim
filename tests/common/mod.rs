@@ -41,4 +41,10 @@ where
             log_datas: Vec::new(),
         }
     }
+
+    pub fn print(&self) {
+        for (lobject, laction, time, duration) in &self.log_datas {
+            println!("{}  {}  {}  {}", time, duration, lobject.log_repr(), laction.log_repr());
+        }
+    }
 }

@@ -1,6 +1,7 @@
+use crate::command_and_reply::CommandReplyStat;
 use crate::command_logic::BattleLogic;
 use crate::gametime::GameTime;
-use crate::log_data::LogRepresentable;
+use crate::log_data::{LogRepresentable, LogWriter};
 use crate::map::MapReadAccess;
 use crate::map_object::MapObject;
 use crate::map_prober::MapProber;
@@ -8,6 +9,7 @@ use crate::maptile_logic::MaptileLogic;
 use crate::object_layer::ObjectLayer;
 use crate::player_state::PlayerControl;
 use crate::script_repr::{FromScriptRepr, ToScriptRepr};
+
 use std::collections::HashMap;
 use std::hash::Hash;
 use std::marker::PhantomData;
@@ -29,7 +31,9 @@ pub enum PlayerCommand<R> {
 }
 
 impl<R> LogRepresentable for PlayerCommand<R>
-where R: LogRepresentable {
+where
+    R: LogRepresentable,
+{
     fn log_repr(&self) -> String {
         match self {
             PlayerCommand::MoveFwd => "move-forward".to_owned(),
@@ -44,9 +48,20 @@ where R: LogRepresentable {
 
 #[derive(Clone)]
 pub enum PlayerCommandReply {
-    None,
+    Failed,
+    Ok,
     Bool(bool),
     LookResult(Vec<(String, Option<String>)>),
+}
+
+impl CommandReplyStat for PlayerCommandReply {
+    fn command_succeeded(&self) -> bool {
+        if let PlayerCommandReply::Failed = self {
+            false
+        } else {
+            true
+        }
+    }
 }
 
 pub enum ObjectCacheType {
@@ -108,22 +123,25 @@ where
     _marker1: PhantomData<T>,
 }
 
-impl<T, M, L, R, P, Pr, OLayer> BattleLogic<P, PlayerCommand<R>, PlayerCommandReply>
+impl<T, M, L, R, P, Pr, OLayer, LW>
+    BattleLogic<P, PlayerCommand<R>, PlayerCommandReply, LW, String, String>
     for SimpleBattleLogic<T, M, L, Pr, R, OLayer>
 where
     T: Copy + Clone + Send + ToScriptRepr,
     L: MaptileLogic<T>,
     M: MapReadAccess<T>,
-    R: Copy + Clone + Eq + Hash + Send + 'static + FromScriptRepr,
+    R: Copy + Clone + Eq + Hash + Send + 'static + FromScriptRepr + LogRepresentable,
     OLayer: ObjectLayer<R, ObjectCacheRepr<R>>,
-    P: PlayerControl + MapObject<R> + ToScriptRepr,
+    P: PlayerControl + MapObject<R> + ToScriptRepr + LogRepresentable,
     Pr: MapProber<T, R, M, L, ObjectCacheRepr<R>, OLayer>,
+    LW: LogWriter<String, String>,
 {
     fn process_commands(
         &mut self,
         player_i: usize,
         com: PlayerCommand<R>,
         player_states: &mut [P],
+        log_writer: &mut LW,
     ) -> PlayerCommandReply {
         match com {
             PlayerCommand::MoveFwd => {
@@ -132,27 +150,31 @@ where
 
                 let (fwd_pos_x, fwd_pos_y) = player_state.forward_pos();
                 let tile = self.map.get_tile_at(fwd_pos_x, fwd_pos_y);
-                if self.logic.passable(tile)
+                let reply = if self.logic.passable(tile)
                     && self
                         .object_layer
                         .objects_at_are_passable(fwd_pos_x, fwd_pos_y)
                 {
                     player_state.move_forward();
-                }
+                    PlayerCommandReply::Ok
+                } else {
+                    PlayerCommandReply::Failed
+                };
+
                 // TODO: interact with the object if moved onto one
-                PlayerCommandReply::None
+                reply
             }
             PlayerCommand::TurnCW => {
                 self.recreate_objects_layer(player_states);
                 let player_state = &mut player_states[player_i];
                 player_state.turn_cw();
-                PlayerCommandReply::None
+                PlayerCommandReply::Ok
             }
             PlayerCommand::TurnCCW => {
                 self.recreate_objects_layer(player_states);
                 let player_state = &mut player_states[player_i];
                 player_state.turn_ccw();
-                PlayerCommandReply::None
+                PlayerCommandReply::Ok
             }
             PlayerCommand::Shoot => {
                 let player_state = &mut player_states[player_i];
@@ -182,11 +204,12 @@ where
                             }
                         }
                     };
+                    PlayerCommandReply::Ok
+                } else {
+                    PlayerCommandReply::Failed
                 }
-
-                PlayerCommandReply::None
             }
-            PlayerCommand::Wait => PlayerCommandReply::None,
+            PlayerCommand::Wait => PlayerCommandReply::Ok,
             PlayerCommand::Look(ori) => {
                 self.recreate_objects_layer(player_states);
                 let look_result = self

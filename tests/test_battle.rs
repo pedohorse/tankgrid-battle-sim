@@ -84,6 +84,8 @@ fn testtest() {
         logger,
     );
     b.run_simulation();
+    println!("BATTLE LOG:");
+    b.log_writer().print();
     assert_eq!(DEFAULT_COMMAND_DURATION, b.time());
     assert_eq!(GridOrientation::Left, b.player_state(0).orientation)
 }
@@ -129,6 +131,8 @@ fn test2players() {
         logger
     );
     b.run_simulation();
+    println!("BATTLE LOG:");
+    b.log_writer().print();
     assert_eq!(20, b.time());
     assert_eq!(GridOrientation::Up, b.player_state(0).orientation);
     assert_eq!(GridOrientation::Up, b.player_state(1).orientation);
@@ -175,6 +179,8 @@ fn test_2players_move_into_each_other() {
         logger
     );
     b.run_simulation();
+    println!("BATTLE LOG:");
+    b.log_writer().print();
     println!(
         "{}: p0({},{}), p1({},{})",
         b.time(),
@@ -228,6 +234,8 @@ fn test_2players_move_past_each_other() {
         logger
     );
     b.run_simulation();
+    println!("BATTLE LOG:");
+    b.log_writer().print();
     println!(
         "{}: p0({},{}), p1({},{})",
         b.time(),
@@ -290,6 +298,8 @@ fn test_2players_move_into_each_other_but_shoot() {
         logger
     );
     b.run_simulation();
+    println!("BATTLE LOG:");
+    b.log_writer().print();
     println!(
         "{}: p0({},{}), p1({},{})",
         b.time(),
@@ -350,6 +360,8 @@ fn test2players_inf_loop() {
         logger
     );
     b.run_simulation();
+    println!("BATTLE LOG:");
+    b.log_writer().print();
     assert_eq!(20, b.time());
 }
 
@@ -397,5 +409,7 @@ fn test2players_bad_inf_loop() {
         logger
     );
     b.run_simulation();
+    println!("BATTLE LOG:");
+    b.log_writer().print();
     assert_eq!(20, b.time());
 }

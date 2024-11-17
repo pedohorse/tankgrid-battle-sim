@@ -10,3 +10,4 @@ pub mod object_layer;
 pub mod player_state;
 pub mod script_repr;
 pub mod log_data;
+pub mod command_and_reply;

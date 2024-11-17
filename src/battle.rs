@@ -10,6 +10,7 @@ use std::{cell::RefCell, rc::Rc, sync::mpsc};
 use super::command_logic::BattleLogic;
 use super::gametime::GameTime;
 use super::log_data::{LogRepresentable, LogWriter};
+use super::command_and_reply::CommandReplyStat;
 
 use super::player_state::PlayerControl;
 use super::script_repr::ToScriptRepr;
@@ -23,7 +24,7 @@ use rustpython_vm::{
 #[derive(Clone, Copy, PartialEq)]
 pub enum PlayerCommandState<PC> {
     None,
-    GotCommand(PC, GameTime),
+    GotCommand(PC, GameTime, usize),
     Finish,
 }
 
@@ -32,9 +33,9 @@ impl<PC> PlayerCommandState<PC> {
         mem::replace(self, PlayerCommandState::None)
     }
 
-    pub fn unwrap(self) -> (PC, GameTime) {
-        if let PlayerCommandState::GotCommand(c, t) = self {
-            (c, t)
+    pub fn unwrap(self) -> (PC, GameTime, usize) {
+        if let PlayerCommandState::GotCommand(c, t, c_id) = self {
+            (c, t, c_id)
         } else {
             panic!("unwrap failed!");
         }
@@ -45,7 +46,7 @@ pub struct Battle<P, BLogic, PCom, PComRep, LW>
 where
     P: PlayerControl + LogRepresentable,
     PCom: LogRepresentable,
-    BLogic: BattleLogic<P, PCom, PComRep>,
+    BLogic: BattleLogic<P, PCom, PComRep, LW, String, String>,
     LW: LogWriter<String, String>,
 {
     player_states: Vec<P>,
@@ -54,6 +55,7 @@ where
     time: GameTime,
     log_writer: LW,
     player_death_logged: Vec<bool>,
+    next_command_id: usize, // each player command will get a unique id for logging
     _marker: PhantomData<(PCom, PComRep)>,
 }
 
@@ -63,9 +65,9 @@ pub const VM_THINK_TIMEOUT: time::Duration = time::Duration::from_secs(5);
 impl<P, BLogic, PCom, PComRep, LW> Battle<P, BLogic, PCom, PComRep, LW>
 where
     P: PlayerControl + ToScriptRepr + LogRepresentable,
-    BLogic: BattleLogic<P, PCom, PComRep>,
+    BLogic: BattleLogic<P, PCom, PComRep, LW, String, String>,
     PCom: LogRepresentable + Hash + Copy + PartialEq + Eq + Send + 'static,
-    PComRep: Send + 'static,
+    PComRep: CommandReplyStat + Send + 'static,
     LW: LogWriter<String, String>,
 {
     pub fn new(
@@ -82,6 +84,7 @@ where
             battle_logic,
             log_writer,
             time: 0,
+            next_command_id: 0,
             _marker: PhantomData,
         }
     }
@@ -92,6 +95,10 @@ where
 
     pub fn player_state(&self, i: usize) -> &P {
         &self.player_states[i]
+    }
+
+    pub fn log_writer(&self) -> &LW {
+        &self.log_writer
     }
 
     pub fn run_simulation(&mut self) {
@@ -132,10 +139,20 @@ where
                 let mut players_that_have_commands = 0;
 
                 // check dead
-                for (i, (player, death_logged)) in self.player_states.iter().zip(self.player_death_logged.iter_mut()).enumerate() {
+                for (i, (player, death_logged)) in self
+                    .player_states
+                    .iter()
+                    .zip(self.player_death_logged.iter_mut())
+                    .enumerate()
+                {
                     if player.is_dead() && !*death_logged {
                         next_commands[i] = PlayerCommandState::Finish;
-                        self.log_writer.add_log_data(self.player_states[i].log_repr(), "dies".to_owned(), self.time, 0);
+                        self.log_writer.add_log_data(
+                            self.player_states[i].log_repr(),
+                            "dies".to_owned(),
+                            self.time,
+                            0,
+                        );
                         *death_logged = true;
                     }
                 }
@@ -148,14 +165,30 @@ where
                         players_that_have_commands += 1;
                         continue;
                     };
-                    if let PlayerCommandState::GotCommand(_, _) = next_commands[i] {
+                    if let PlayerCommandState::GotCommand(_, _, _) = next_commands[i] {
                         players_that_have_commands += 1;
                         continue;
                     }
 
                     match command_receiver.try_recv() {
                         Ok(com) => {
-                            next_commands[i] = PlayerCommandState::GotCommand(com, self.time);
+                            let command_id = self.next_command_id;
+                            self.next_command_id += 1;
+                            next_commands[i] =
+                                PlayerCommandState::GotCommand(com, self.time, command_id);
+                            // note: we call duration calculated here as "estimated"
+                            // cuz technically it may change due to player_state change by the time
+                            // it's time to pick next command to execute
+                            let player_state = &self.player_states[i];
+                            let est_duration =
+                                self.battle_logic.get_command_duration(player_state, &com);
+                            // note - operation logged here MAY not complete, depending on concrete game logic
+                            self.log_writer.add_log_data(
+                                player_state.log_repr(),
+                                format!("{}:{}", command_id, com.to_log_repr()),
+                                self.time,
+                                est_duration,
+                            );
                             players_that_have_commands += 1;
                             continue;
                         }
@@ -228,39 +261,45 @@ where
                     }
 
                     // if not done - select command to execute and advance time
-                    if let Some((remaining_duration, full_duration, player_i, next_command)) = next_commands
-                        .iter_mut()
-                        .enumerate()
-                        .filter(|(_, k)| {
-                            // filter out Finish commands
-                            if let PlayerCommandState::Finish = k {
-                                false
-                            } else {
-                                true
-                            }
-                        })
-                        .map(|(player_i, k)| {
-                            // calc remaining duration and other useful things
-                            let (com, command_start_gametime) =
-                                if let PlayerCommandState::GotCommand(x, y) = k {
-                                    (x, y)
+                    if let Some((remaining_duration, full_duration, player_i, next_command)) =
+                        next_commands
+                            .iter_mut()
+                            .enumerate()
+                            .filter(|(_, k)| {
+                                // filter out Finish commands
+                                if let PlayerCommandState::Finish = k {
+                                    false
                                 } else {
-                                    // filter above must have filtered Finish out, and None must not happen cuz of prev logic
-                                    unreachable!();
-                                };
-                            let player_state = &mut self.player_states[player_i];
-                            // duration may be based in stats or map modifiers
-                            let duration =
-                                self.battle_logic.get_command_duration(&player_state, com);
+                                    true
+                                }
+                            })
+                            .map(|(player_i, k)| {
+                                // calc remaining duration and other useful things
+                                let (com, command_start_gametime) =
+                                    if let PlayerCommandState::GotCommand(x, y, _) = k {
+                                        (x, y)
+                                    } else {
+                                        // filter above must have filtered Finish out, and None must not happen cuz of prev logic
+                                        unreachable!();
+                                    };
+                                let player_state = &mut self.player_states[player_i];
+                                // duration may be based in stats or map modifiers
+                                let duration =
+                                    self.battle_logic.get_command_duration(&player_state, com);
 
-                            //
-                            (*command_start_gametime + duration - self.time, duration, player_i, k)
-                        })
-                        .min_by_key(|k| k.0)
+                                //
+                                (
+                                    *command_start_gametime + duration - self.time,
+                                    duration,
+                                    player_i,
+                                    k,
+                                )
+                            })
+                            .min_by_key(|k| k.0)
                     {
                         // process the next command
 
-                        let (com, _) = next_command.take().unwrap();
+                        let (com, _, command_id) = next_command.take().unwrap();
 
                         // ONLY Finished command may have None for reply channel by design
                         //  also we bravely unwrap cuz channels may close only in the start of the loop
@@ -270,7 +309,10 @@ where
                             player_i,
                             com,
                             &mut self.player_states,
+                            &mut self.log_writer,  // TODO: not sure if this is needed
                         );
+
+                        let command_succeeded = reply.command_succeeded();
 
                         // send reply
                         if let Err(_) = reply_channel.send(reply) {
@@ -279,11 +321,17 @@ where
                             *next_command = PlayerCommandState::Finish;
                             continue;
                         }
-                        
-                        // log
-                        self.log_writer.add_log_data(self.player_states[player_i].log_repr(), com.to_log_repr(), self.time, full_duration);
+
                         start_timestamps[player_i] = Instant::now(); // update timeout counter
                         self.time += remaining_duration;
+
+                        // log operation finish
+                        self.log_writer.add_log_data(
+                            self.player_states[player_i].log_repr(),
+                            format!("{}:{}:{}", command_id, com.to_log_repr(), if command_succeeded {"DONE"} else {"FAILED"}),
+                            self.time,
+                            0,
+                        );
                     } else {
                         // no min - means all commands are Finish, but that must have been checked before, so
                         unreachable!("should not be reached");
