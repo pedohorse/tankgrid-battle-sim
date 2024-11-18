@@ -8,11 +8,6 @@ pub struct GridBattleMap<T> {
     map_data: MapData<T>,
 }
 
-
-pub trait FromFile<T> {
-    fn load_from_file(path: &Path) -> std::io::Result<GridBattleMap<T>>;
-}
-
 impl<T> MapReadAccess<T> for GridBattleMap<T>
 where
     T: Copy + Clone,
@@ -86,5 +81,9 @@ where
             height,
             map_data,
         })
+    }
+
+    pub fn map_data(&self) -> &MapData<T> {
+        &self.map_data
     }
 }

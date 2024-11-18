@@ -12,3 +12,4 @@ pub mod object_layer;
 pub mod orientation;
 pub mod player_state;
 pub mod script_repr;
+pub mod serialization;
