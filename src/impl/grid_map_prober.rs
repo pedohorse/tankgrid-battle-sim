@@ -90,7 +90,7 @@ impl GridMapProber {
         F: FnMut(T, Option<&'a MObj>),
     {
         let (mut x, mut y) = from;
-        while map.is_within_bounds(x, y) {
+        for _ in 0..MAX_LOOK_DIST {
             match orientation {
                 GridOrientation::Up => {
                     y -= 1;

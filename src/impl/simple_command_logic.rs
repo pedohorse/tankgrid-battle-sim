@@ -7,6 +7,7 @@ use crate::map_object::MapObject;
 use crate::map_prober::MapProber;
 use crate::maptile_logic::MaptileLogic;
 use crate::object_layer::ObjectLayer;
+use crate::orientation::SimpleOrientation;
 use crate::player_state::PlayerControl;
 use crate::script_repr::{FromScriptRepr, ToScriptRepr};
 
@@ -41,7 +42,7 @@ where
             PlayerCommand::TurnCCW => "turn-ccw".to_owned(),
             PlayerCommand::Shoot => "shoot".to_owned(),
             PlayerCommand::Wait => "wait".to_owned(),
-            PlayerCommand::Look(dir) => format!("look({}", dir.log_repr()),
+            PlayerCommand::Look(dir) => format!("look({})", dir.log_repr()),
         }
     }
 }
@@ -130,7 +131,15 @@ where
     T: Copy + Clone + Send + ToScriptRepr,
     L: MaptileLogic<T>,
     M: MapReadAccess<T>,
-    R: Copy + Clone + Eq + Hash + Send + 'static + FromScriptRepr + LogRepresentable,
+    R: Copy
+        + Clone
+        + Eq
+        + Hash
+        + Send
+        + 'static
+        + SimpleOrientation
+        + FromScriptRepr
+        + LogRepresentable,
     OLayer: ObjectLayer<R, ObjectCacheRepr<R>>,
     P: PlayerControl + MapObject<R> + ToScriptRepr + LogRepresentable,
     Pr: MapProber<T, R, M, L, ObjectCacheRepr<R>, OLayer>,
@@ -156,6 +165,8 @@ where
                         .objects_at_are_passable(fwd_pos_x, fwd_pos_y)
                 {
                     player_state.move_forward();
+                    // pick up object if something is there
+                    // and write log
                     PlayerCommandReply::Ok
                 } else {
                     PlayerCommandReply::Failed
@@ -225,7 +236,16 @@ where
                     .map(|(t, maybe_obj)| {
                         (
                             t.to_script_repr(),
-                            maybe_obj.map(|obj| obj.to_script_repr()),
+                            maybe_obj.map(|obj| {
+                                let obj_ori = if obj.orientation().opposite_of(&ori) {
+                                    "front"
+                                } else if obj.orientation().same_as(&ori) {
+                                    "back"
+                                } else {
+                                    "side"
+                                };
+                                format!("{}({})", obj.to_script_repr(), obj_ori)
+                            }),
                         )
                     })
                     .collect();

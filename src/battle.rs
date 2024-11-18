@@ -350,8 +350,8 @@ where
                     Ok(Ok(_)) => {
                         println!("program finished fine");
                     }
-                    Ok(Err(_)) => {
-                        println!("program errored out");
+                    Ok(Err(e)) => {
+                        println!("program errored out: {}", e);
                     }
                     Err(_) => {
                         println!("something went funky with the thread!");
@@ -372,7 +372,7 @@ where
         command_channel: mpsc::Sender<PCom>,
         reply_channel: mpsc::Receiver<PComRep>, // PlayerCommandReply<(String, Option<String>)>
         vm_signal_receiver: UserSignalReceiver,
-    ) -> Result<(), ()> {
+    ) -> Result<(), String> {
         macro_rules! send_command {
             ($vm:ident, $command_channel:ident, $reply_channel:ident, $cmd:expr) => {{
                 let command_channel = if let Some(x) = $command_channel.upgrade() {
@@ -424,11 +424,17 @@ where
             let code_obj = match vm.compile(&program, compiler::Mode::Exec, "<embedded>".to_owned())
             {
                 Ok(x) => x,
-                Err(e) => return Err(()),
+                Err(e) => {
+                    return Err(e.to_string());
+                }
             };
 
-            if let PyResult::Err(_) = vm.run_code_obj(code_obj, scope) {
-                return Err(());
+            if let PyResult::Err(e) = vm.run_code_obj(code_obj, scope) {
+                let mut exc_str = String::new();
+                vm.write_exception(&mut exc_str, &e).unwrap_or_else(|_| {
+                    exc_str.push_str("unknown error");
+                });
+                return Err(exc_str);
             }
 
             Ok(())

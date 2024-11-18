@@ -12,34 +12,7 @@ use battle_sim::r#impl::trivial_object_layer::TrivialObjectLayer;
 use std::collections::HashMap;
 
 mod common;
-use common::{SimpleTileType, VecLogWriter};
-
-struct TestTrivialLogic {}
-
-impl<T> MaptileLogic<T> for TestTrivialLogic {
-    // trivial impl
-    fn move_from(&self, tile: T) -> T {
-        tile
-    }
-    fn move_onto(&self, tile: T) -> T {
-        tile
-    }
-    fn pass_speed_percentage(&self, _tile: T) -> u32 {
-        100
-    }
-    fn turn_speed_percentage(&self, _tile: T) -> u32 {
-        100
-    }
-    fn passable(&self, _tile: T) -> bool {
-        true
-    }
-    fn seethroughable(&self, _tile: T) -> bool {
-        true
-    }
-    fn shoot(&self, tile: T) -> T {
-        tile
-    }
-}
+use common::{SimpleTileType, VecLogWriter, TestTrivialLogic};
 
 struct TestNoObjectCache {}
 

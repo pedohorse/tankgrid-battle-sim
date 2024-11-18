@@ -131,7 +131,7 @@ impl MapObject<GridOrientation> for GridPlayerState {
 
 impl ToScriptRepr for GridPlayerState {
     fn to_script_repr(&self) -> String {
-        "enemy".to_owned()
+        self.name.to_owned()
     }
 }
 
