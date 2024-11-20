@@ -126,7 +126,7 @@ if looked == [('empty_tile', None), ('wall', None)]:\n
     move_forward()\n
     looked = look('right')\n
     print(looked)\n
-    if looked == [('empty_tile', None)]*4 + [('empty_tile', 'player1(side)')]:\n
+    if looked == [('empty_tile', None)]*4 + [('empty_tile', 'player[player1](side)')]:\n
         move_forward()\n
 \
             "
