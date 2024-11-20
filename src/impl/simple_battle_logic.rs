@@ -300,6 +300,9 @@ where
             }
             PlayerCommand::Wait => (PlayerCommandReply::Ok, None),
             PlayerCommand::Look(ori) => {
+                // note: look command's ori is relative to tank orientation
+                // so we need to convert it to global orientation
+                let ori = ori.from_relative_to_global(&player_states[player_i].orientation());
                 self.recreate_objects_layer(player_states);
                 let look_result = self
                     .map_prober
@@ -429,6 +432,7 @@ where
             let comm_chan = comm_chan.clone();
             move |direction: String, vm: &VirtualMachine| -> PyResult<_> {
                 println!("TEST: look");
+                // note: look command is RELATIVE to tank orientation
                 let direction = if let Some(x) = R::from_script_repr(&direction) {
                     x
                 } else {

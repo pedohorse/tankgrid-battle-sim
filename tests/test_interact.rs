@@ -82,7 +82,7 @@ print('yeah!')\n
                 GridPlayerState::new(20, 5, GridOrientation::East, 0, 1, "player2"),
                 "\
 print('second')\n
-looked = look('south')\n
+looked = look('right')\n
 print(looked)\n
 print('second yeah!')\n
 if looked[-1][1].startswith('player'):\n
@@ -118,13 +118,13 @@ print('yeah!')\n
                 GridPlayerState::new(4, 2, GridOrientation::East, 0, 1, "player2"),
                 "\
 print('second')\n
-looked = look('south')\n
+looked = look('right')\n
 print(looked)\n
 print('second yeah!')\n
 if looked == [('empty_tile', None), ('wall', None)]:\n
     print('wall')\n
     move_forward()\n
-    looked = look('south')\n
+    looked = look('right')\n
     print(looked)\n
     if looked == [('empty_tile', None)]*4 + [('empty_tile', 'player1(side)')]:\n
         move_forward()\n
