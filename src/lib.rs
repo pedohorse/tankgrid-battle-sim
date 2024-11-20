@@ -1,6 +1,6 @@
 pub mod battle;
 pub mod command_and_reply;
-pub mod command_logic;
+pub mod battle_logic;
 pub mod gametime;
 pub mod r#impl;
 pub mod log_data;

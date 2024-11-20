@@ -1,7 +1,7 @@
 use crate::command_and_reply::CommandReplyStat;
-use crate::command_logic::BattleLogic;
+use crate::battle_logic::BattleLogic;
 use crate::gametime::GameTime;
-use crate::log_data::{LogRepresentable, LogWriter};
+use crate::log_data::LogRepresentable;
 use crate::map::MapReadAccess;
 use crate::map_object::MapObject;
 use crate::map_prober::MapProber;
@@ -29,6 +29,8 @@ pub enum PlayerCommand<R> {
     Shoot,
     Wait,
     Look(R),
+    AddAmmo(usize),   // generated after picking up ammo crate
+    AddHealth(usize), // generated after picking up health
 }
 
 impl<R> LogRepresentable for PlayerCommand<R>
@@ -42,7 +44,9 @@ where
             PlayerCommand::TurnCCW => "turn-ccw".to_owned(),
             PlayerCommand::Shoot => "shoot".to_owned(),
             PlayerCommand::Wait => "wait".to_owned(),
-            PlayerCommand::Look(dir) => format!("look({})", dir.log_repr()),
+            PlayerCommand::Look(dir) => format!("look[{}]", dir.log_repr()),
+            PlayerCommand::AddAmmo(ammo) => format!("add-ammo[{}]", ammo),
+            PlayerCommand::AddHealth(health) => format!("heal[{}]", health),
         }
     }
 }
@@ -67,10 +71,22 @@ impl CommandReplyStat for PlayerCommandReply {
 
 pub enum ObjectCacheType {
     Player(usize),
+    AmmoCrate(usize),
     //Stuff, // TODO: add stuff like pickable items
 }
 
+impl LogRepresentable for ObjectCacheType {
+    fn log_repr(&self) -> String {
+        match self {
+            ObjectCacheType::Player(_) => "player",
+            ObjectCacheType::AmmoCrate(_) => "ammocrate",
+        }
+        .to_owned()
+    }
+}
+
 pub struct ObjectCacheRepr<R> {
+    uid: u64,
     obj_type: ObjectCacheType,
     pos: (i64, i64),
     rot: R,
@@ -84,6 +100,10 @@ impl<R> MapObject<R> for ObjectCacheRepr<R>
 where
     R: Copy,
 {
+    fn unique_id(&self) -> u64 {
+        self.uid
+    }
+
     fn orientation(&self) -> R {
         self.rot
     }
@@ -107,6 +127,12 @@ impl<R> ToScriptRepr for ObjectCacheRepr<R> {
     }
 }
 
+impl<R> LogRepresentable for ObjectCacheRepr<R> {
+    fn log_repr(&self) -> String {
+        format!("obj[{}]({})", self.obj_type.log_repr(), self.uid)
+    }
+}
+
 pub struct SimpleBattleLogic<T, M, L, Pr, R, OLayer>
 where
     L: MaptileLogic<T>,
@@ -118,14 +144,17 @@ where
     map: M,
     logic: L,
     map_prober: Pr,
-    command_durations: HashMap<PlayerCommand<R>, usize>,
+    command_durations: HashMap<PlayerCommand<R>, GameTime>,
     object_layer: OLayer,
+    player_count_to_win: usize,
     _marker0: PhantomData<R>,
     _marker1: PhantomData<T>,
 }
 
-impl<T, M, L, R, P, Pr, OLayer, LW>
-    BattleLogic<P, PlayerCommand<R>, PlayerCommandReply, LW, String, String>
+const HEALTH_RES: usize = 0;
+const AMMO_RES: usize = 1;
+
+impl<T, M, L, R, P, Pr, OLayer> BattleLogic<P, PlayerCommand<R>, PlayerCommandReply, String, String>
     for SimpleBattleLogic<T, M, L, Pr, R, OLayer>
 where
     T: Copy + Clone + Send + ToScriptRepr,
@@ -143,19 +172,31 @@ where
     OLayer: ObjectLayer<R, ObjectCacheRepr<R>>,
     P: PlayerControl + MapObject<R> + ToScriptRepr + LogRepresentable,
     Pr: MapProber<T, R, M, L, ObjectCacheRepr<R>, OLayer>,
-    LW: LogWriter<String, String>,
 {
-    fn process_commands(
+    fn is_player_dead(&self, player: &P) -> bool {
+        player.resource_value(HEALTH_RES) <= 0
+    }
+
+    fn game_finished(&self, players: &[P]) -> bool {
+        // default impl returns true when only single player left
+        players.iter().filter(|p| !self.is_player_dead(*p)).count() <= self.player_count_to_win
+    }
+
+    fn process_commands<LWF>(
         &mut self,
         player_i: usize,
         com: PlayerCommand<R>,
         player_states: &mut [P],
-        log_writer: &mut LW,
-    ) -> PlayerCommandReply {
+        logger: &mut LWF,
+    ) -> (PlayerCommandReply, Option<Vec<PlayerCommand<R>>>)
+    where
+        LWF: FnMut(String, String),
+    {
         match com {
             PlayerCommand::MoveFwd => {
                 self.recreate_objects_layer(player_states);
                 let player_state = &mut player_states[player_i];
+                let mut extra_commands = None;
 
                 let (fwd_pos_x, fwd_pos_y) = player_state.forward_pos();
                 let tile = self.map.get_tile_at(fwd_pos_x, fwd_pos_y);
@@ -165,32 +206,51 @@ where
                         .objects_at_are_passable(fwd_pos_x, fwd_pos_y)
                 {
                     player_state.move_forward();
-                    // pick up object if something is there
-                    // and write log
+
+                    // pick up pickable objects
+
+                    let mut objs_to_destroy = Vec::new();
+                    for obj in self.object_layer.objects_at(fwd_pos_x, fwd_pos_y) {
+                        match obj.obj_type {
+                            ObjectCacheType::AmmoCrate(ammo_size) => {
+                                objs_to_destroy.push(obj.unique_id());
+                                extra_commands = Some(vec![PlayerCommand::AddAmmo(ammo_size)]);
+                            }
+                            _ => (),
+                        }
+                    }
+                    for obj_id in objs_to_destroy {
+                        logger(
+                            // unwrap cuz obj must exist as checked in prev loop
+                            self.object_layer.object_by_id(obj_id).unwrap().log_repr(),
+                            "picked".to_owned(),
+                        );
+                        self.object_layer.remove_object(obj_id);
+                    }
+
                     PlayerCommandReply::Ok
                 } else {
                     PlayerCommandReply::Failed
                 };
 
-                // TODO: interact with the object if moved onto one
-                reply
+                (reply, extra_commands)
             }
             PlayerCommand::TurnCW => {
                 self.recreate_objects_layer(player_states);
                 let player_state = &mut player_states[player_i];
                 player_state.turn_cw();
-                PlayerCommandReply::Ok
+                (PlayerCommandReply::Ok, None)
             }
             PlayerCommand::TurnCCW => {
                 self.recreate_objects_layer(player_states);
                 let player_state = &mut player_states[player_i];
                 player_state.turn_ccw();
-                PlayerCommandReply::Ok
+                (PlayerCommandReply::Ok, None)
             }
             PlayerCommand::Shoot => {
                 let player_state = &mut player_states[player_i];
-                if player_state.resource_value(1) > 0 {
-                    player_state.expend_resource(1, 1);
+                if player_state.resource_value(AMMO_RES) > 0 {
+                    player_state.expend_resource(AMMO_RES, 1);
                     self.recreate_objects_layer(player_states);
                     let player_state = &mut player_states[player_i];
                     if let Some((hit_x, hit_y)) = self.map_prober.raycast(
@@ -203,24 +263,31 @@ where
                         false,
                         true,
                     ) {
-                        for obj_ref in self.object_layer.objects_at(hit_x, hit_y).into_iter() {
-                            if !obj_ref.shootable() {
+                        let mut objs_to_destroy = Vec::new();
+                        for obj in self.object_layer.objects_at(hit_x, hit_y).into_iter() {
+                            if !obj.shootable() {
                                 continue;
                             }
-                            match obj_ref.obj_type {
+                            match obj.obj_type {
                                 ObjectCacheType::Player(other_player_i) => {
                                     let hit_enemy = &mut player_states[other_player_i];
-                                    hit_enemy.expend_resource(0, 1);
+                                    hit_enemy.expend_resource(HEALTH_RES, 1);
+                                }
+                                ObjectCacheType::AmmoCrate(_) => {
+                                    objs_to_destroy.push(obj.unique_id());
                                 }
                             }
                         }
+                        for obj_id in objs_to_destroy {
+                            self.object_layer.remove_object(obj_id);
+                        }
                     };
-                    PlayerCommandReply::Ok
+                    (PlayerCommandReply::Ok, None)
                 } else {
-                    PlayerCommandReply::Failed
+                    (PlayerCommandReply::Failed, None)
                 }
             }
-            PlayerCommand::Wait => PlayerCommandReply::Ok,
+            PlayerCommand::Wait => (PlayerCommandReply::Ok, None),
             PlayerCommand::Look(ori) => {
                 self.recreate_objects_layer(player_states);
                 let look_result = self
@@ -250,7 +317,17 @@ where
                     })
                     .collect();
 
-                PlayerCommandReply::LookResult(look_result)
+                (PlayerCommandReply::LookResult(look_result), None)
+            }
+            PlayerCommand::AddAmmo(ammo) => {
+                let player_state = &mut player_states[player_i];
+                player_state.gain_resource(AMMO_RES, ammo);
+                (PlayerCommandReply::Ok, None)
+            }
+            PlayerCommand::AddHealth(health) => {
+                let player_state = &mut player_states[player_i];
+                player_state.gain_resource(HEALTH_RES, health);
+                (PlayerCommandReply::Ok, None)
             }
         }
     }
@@ -381,6 +458,7 @@ where
         map_prober: Pr,
         object_layer: OLayer,
         command_durations: HashMap<PlayerCommand<R>, GameTime>,
+        player_count_to_win: usize,
     ) -> SimpleBattleLogic<T, M, L, Pr, R, OLayer> {
         SimpleBattleLogic {
             map,
@@ -388,22 +466,32 @@ where
             map_prober,
             object_layer,
             command_durations,
+            player_count_to_win,
             _marker0: PhantomData,
             _marker1: PhantomData,
         }
     }
 
     fn recreate_objects_layer<P>(&mut self, player_states: &[P])
-    where
+    where // TODO: player does NOT have to impl MapObject
         P: PlayerControl + MapObject<R> + ToScriptRepr,
     {
-        self.object_layer.clear();
+        // clear player cache
+        self.object_layer.clear_by(|m| {
+            if let ObjectCacheType::Player(_) = &m.obj_type {
+                true
+            } else {
+                false
+            }
+        });
+        // repopulate player cache
         for (i, player) in player_states.iter().enumerate() {
-            if player.resource_value(0) <= 0 {
+            if player.resource_value(HEALTH_RES) <= 0 {
                 // if dead (TODO: may spawn a corpse object instead)
                 continue;
             }
             self.object_layer.add(ObjectCacheRepr {
+                uid: player.unique_id(),
                 obj_type: ObjectCacheType::Player(i),
                 pos: player.position(),
                 rot: player.orientation(),

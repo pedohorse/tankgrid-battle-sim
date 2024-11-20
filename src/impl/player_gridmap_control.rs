@@ -1,8 +1,11 @@
+use std::sync::atomic::Ordering;
+
 use crate::map_object::MapObject;
 use crate::player_state::PlayerControl;
 use crate::script_repr::ToScriptRepr;
 use crate::log_data::LogRepresentable;
 
+use super::unique_id_counter::NEXT_OBJID;
 use super::grid_orientation::GridOrientation;
 //use super::tile_types::TileType;
 //use super::trivial_object_layer::TrivialObjectLayer;
@@ -14,6 +17,7 @@ pub struct GridPlayerState {
     pub ammo: usize,
     pub health: usize,
     pub name: String,
+    unique_id: u64,
 }
 
 impl GridPlayerState {
@@ -32,6 +36,7 @@ impl GridPlayerState {
             ammo,
             health,
             name: name.to_owned(),
+            unique_id: NEXT_OBJID.fetch_add(1, Ordering::Relaxed),
         }
     }
 }
@@ -113,13 +118,13 @@ impl PlayerControl for GridPlayerState
             _ => 0,
         }
     }
-
-    fn is_dead(&self) -> bool {
-        self.health <= 0
-    }
 }
 
 impl MapObject<GridOrientation> for GridPlayerState {
+    fn unique_id(&self) -> u64 {
+        self.unique_id
+    }
+
     fn position(&self) -> (i64, i64) {
         (self.col, self.row)
     }
@@ -137,10 +142,6 @@ impl ToScriptRepr for GridPlayerState {
 
 impl LogRepresentable for GridPlayerState {
     fn log_repr(&self) -> String {
-        self.name.to_owned()
-    }
-
-    fn to_log_repr(self) -> String {
-        self.name.to_owned()
+        format!("player[{}]({})", self.name, self.unique_id)
     }
 }

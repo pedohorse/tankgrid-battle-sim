@@ -50,7 +50,7 @@ where
     pub fn print(&self) {
         for (lobject, laction, time, duration) in &self.log_datas {
             println!(
-                "{}  {}  {}  {}",
+                "{}\t{}\t{}\t{}",
                 time,
                 duration,
                 lobject.log_repr(),

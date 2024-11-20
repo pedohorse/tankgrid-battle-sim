@@ -7,12 +7,12 @@ use battle_sim::r#impl::grid_battle::{GridBattle, GridPlayerState};
 use battle_sim::r#impl::grid_map::GridBattleMap;
 use battle_sim::r#impl::grid_map_prober::GridMapProber;
 use battle_sim::r#impl::grid_orientation::GridOrientation;
-use battle_sim::r#impl::simple_command_logic::{PlayerCommand, SimpleBattleLogic};
+use battle_sim::r#impl::simple_battle_logic::{PlayerCommand, SimpleBattleLogic};
 use battle_sim::r#impl::trivial_object_layer::TrivialObjectLayer;
 use std::collections::HashMap;
 
 mod common;
-use common::{SimpleTileType, VecLogWriter, TestTrivialLogic};
+use common::{SimpleTileType, TestTrivialLogic, VecLogWriter};
 
 struct TestNoObjectCache {}
 
@@ -27,6 +27,17 @@ where
     fn clear(&mut self) {}
     fn objects(&self) -> &[MObj] {
         &[]
+    }
+    fn clear_by<F>(&mut self, f: F)
+    where
+        F: Fn(&MObj) -> bool,
+    {
+    }
+    fn object_by_id(&self, uid: u64) -> Option<&MObj> {
+        None
+    }
+    fn remove_object(&mut self, uid: u64) -> bool {
+        false
     }
     fn objects_at(&self, x: i64, y: i64) -> Vec<&MObj> {
         Vec::new()
@@ -44,6 +55,7 @@ fn testtest() {
             GridMapProber {},
             TrivialObjectLayer::new(),
             HashMap::new(),
+            0,
         ),
         vec![(
             GridPlayerState::new(0, 0, GridOrientation::Down, 0, 1, "player1"),
@@ -78,6 +90,7 @@ fn test2players() {
                 (PlayerCommand::TurnCW, 10),
                 (PlayerCommand::MoveFwd, 20),
             ]),
+            0,
         ),
         vec![
             (
@@ -101,7 +114,7 @@ fn test2players() {
                 .to_owned(),
             ),
         ],
-        logger
+        logger,
     );
     b.run_simulation();
     println!("BATTLE LOG:");
@@ -113,8 +126,8 @@ fn test2players() {
     assert_eq!(0, b.player_state(0).col);
     assert_eq!(1, b.player_state(1).row);
     assert_eq!(2, b.player_state(1).col);
-    assert!(!b.player_state(0).is_dead());
-    assert!(!b.player_state(1).is_dead());
+    assert!(!b.is_player_dead(0));
+    assert!(!b.is_player_dead(1));
 }
 
 #[test]
@@ -132,6 +145,7 @@ fn test_2players_move_into_each_other() {
                 (PlayerCommand::TurnCW, 10),
                 (PlayerCommand::MoveFwd, 20),
             ]),
+            0,
         ),
         vec![
             (
@@ -149,7 +163,7 @@ fn test_2players_move_into_each_other() {
                 .to_owned(),
             ),
         ],
-        logger
+        logger,
     );
     b.run_simulation();
     println!("BATTLE LOG:");
@@ -168,8 +182,8 @@ fn test_2players_move_into_each_other() {
     assert_eq!(1, b.player_state(0).row);
     assert_eq!(1, b.player_state(1).row);
     assert!(b.player_state(0).col != b.player_state(1).col);
-    assert!(!b.player_state(0).is_dead());
-    assert!(!b.player_state(1).is_dead());
+    assert!(!b.is_player_dead(0));
+    assert!(!b.is_player_dead(1));
 }
 
 #[test]
@@ -187,6 +201,7 @@ fn test_2players_move_past_each_other() {
                 (PlayerCommand::TurnCW, 10),
                 (PlayerCommand::MoveFwd, 20),
             ]),
+            0,
         ),
         vec![
             (
@@ -204,7 +219,7 @@ fn test_2players_move_past_each_other() {
                 .to_owned(),
             ),
         ],
-        logger
+        logger,
     );
     b.run_simulation();
     println!("BATTLE LOG:");
@@ -223,8 +238,8 @@ fn test_2players_move_past_each_other() {
     assert_eq!(1, b.player_state(0).row);
     assert_eq!(2, b.player_state(1).row);
     assert!(b.player_state(0).col == b.player_state(1).col);
-    assert!(!b.player_state(0).is_dead());
-    assert!(!b.player_state(1).is_dead());
+    assert!(!b.is_player_dead(0));
+    assert!(!b.is_player_dead(1));
 }
 
 #[test]
@@ -243,6 +258,7 @@ fn test_2players_move_into_each_other_but_shoot() {
                 (PlayerCommand::MoveFwd, 20),
                 (PlayerCommand::Shoot, 5),
             ]),
+            0,
         ),
         vec![
             (
@@ -268,7 +284,7 @@ fn test_2players_move_into_each_other_but_shoot() {
                 .to_owned(),
             ),
         ],
-        logger
+        logger,
     );
     b.run_simulation();
     println!("BATTLE LOG:");
@@ -288,8 +304,8 @@ fn test_2players_move_into_each_other_but_shoot() {
     assert_eq!(1, b.player_state(0).row);
     assert_eq!(0, b.player_state(0).col);
     assert_eq!(1, b.player_state(1).row);
-    assert!(b.player_state(0).is_dead());
-    assert!(!b.player_state(1).is_dead());
+    assert!(b.is_player_dead(0));
+    assert!(!b.is_player_dead(1));
 }
 
 #[test]
@@ -307,6 +323,7 @@ fn test2players_inf_loop() {
                 (PlayerCommand::TurnCW, 10),
                 (PlayerCommand::MoveFwd, 20),
             ]),
+            0,
         ),
         vec![
             (
@@ -330,7 +347,7 @@ fn test2players_inf_loop() {
                 .to_owned(),
             ),
         ],
-        logger
+        logger,
     );
     b.run_simulation();
     println!("BATTLE LOG:");
@@ -353,6 +370,7 @@ fn test2players_bad_inf_loop() {
                 (PlayerCommand::TurnCW, 10),
                 (PlayerCommand::MoveFwd, 20),
             ]),
+            0,
         ),
         vec![
             (
@@ -379,7 +397,7 @@ fn test2players_bad_inf_loop() {
                 .to_owned(),
             ),
         ],
-        logger
+        logger,
     );
     b.run_simulation();
     println!("BATTLE LOG:");

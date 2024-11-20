@@ -1,5 +1,5 @@
 use super::grid_orientation::GridOrientation;
-use super::simple_command_logic::{PlayerCommand, PlayerCommandReply};
+use super::simple_battle_logic::{PlayerCommand, PlayerCommandReply};
 use crate::battle::Battle;
 
 pub use super::player_gridmap_control::GridPlayerState;

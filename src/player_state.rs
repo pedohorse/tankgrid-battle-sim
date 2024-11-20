@@ -10,5 +10,4 @@ pub trait PlayerControl
     fn gain_resource(&mut self, res_id: usize, amount: usize);
 
     fn resource_value(&self, res_id: usize) -> usize;
-    fn is_dead(&self) -> bool;
 }

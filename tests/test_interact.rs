@@ -4,7 +4,7 @@ use battle_sim::r#impl::grid_battle::{GridBattle, GridPlayerState};
 use battle_sim::r#impl::grid_map::GridBattleMap;
 use battle_sim::r#impl::grid_map_prober::GridMapProber;
 use battle_sim::r#impl::grid_orientation::GridOrientation;
-use battle_sim::r#impl::simple_command_logic::{
+use battle_sim::r#impl::simple_battle_logic::{
     ObjectCacheRepr, PlayerCommand, SimpleBattleLogic,
 };
 use battle_sim::r#impl::trivial_object_layer::TrivialObjectLayer;
@@ -52,6 +52,7 @@ where
                 (PlayerCommand::Look(GridOrientation::Down), 5),
                 (PlayerCommand::Look(GridOrientation::Left), 5),
             ]),
+            0,
         ),
         player_programs,
         logger,

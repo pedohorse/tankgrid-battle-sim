@@ -1,4 +1,5 @@
 use std::cmp::Eq;
+use std::collections::VecDeque;
 use std::hash::Hash;
 use std::marker::PhantomData;
 use std::mem;
@@ -7,10 +8,10 @@ use std::thread;
 use std::time::{self, Duration, Instant};
 use std::{cell::RefCell, rc::Rc, sync::mpsc};
 
-use super::command_logic::BattleLogic;
+use super::battle_logic::BattleLogic;
+use super::command_and_reply::CommandReplyStat;
 use super::gametime::GameTime;
 use super::log_data::{LogRepresentable, LogWriter};
-use super::command_and_reply::CommandReplyStat;
 
 use super::player_state::PlayerControl;
 use super::script_repr::ToScriptRepr;
@@ -46,7 +47,7 @@ pub struct Battle<P, BLogic, PCom, PComRep, LW>
 where
     P: PlayerControl + LogRepresentable,
     PCom: LogRepresentable,
-    BLogic: BattleLogic<P, PCom, PComRep, LW, String, String>,
+    BLogic: BattleLogic<P, PCom, PComRep, String, String>,
     LW: LogWriter<String, String>,
 {
     player_states: Vec<P>,
@@ -65,7 +66,7 @@ pub const VM_THINK_TIMEOUT: time::Duration = time::Duration::from_secs(5);
 impl<P, BLogic, PCom, PComRep, LW> Battle<P, BLogic, PCom, PComRep, LW>
 where
     P: PlayerControl + ToScriptRepr + LogRepresentable,
-    BLogic: BattleLogic<P, PCom, PComRep, LW, String, String>,
+    BLogic: BattleLogic<P, PCom, PComRep, String, String>,
     PCom: LogRepresentable + Hash + Copy + PartialEq + Eq + Send + 'static,
     PComRep: CommandReplyStat + Send + 'static,
     LW: LogWriter<String, String>,
@@ -97,6 +98,10 @@ where
         &self.player_states[i]
     }
 
+    pub fn is_player_dead(&self, i: usize) -> bool {
+        self.battle_logic.is_player_dead(&self.player_states[i])
+    }
+
     pub fn log_writer(&self) -> &LW {
         &self.log_writer
     }
@@ -109,11 +114,14 @@ where
             let mut handles = Vec::with_capacity(player_count);
             let mut channels = Vec::with_capacity(player_count);
             let mut thread_stop_signal_senders = Vec::with_capacity(player_count);
+            let mut player_extra_commands_queues = vec![VecDeque::new(); player_count];
+            let mut thread_ready_chans = Vec::with_capacity(player_count);
 
             for program in self.player_programs.iter() {
                 let (command_sender, command_receiver) = mpsc::channel();
                 let (result_sender, result_receiver) = mpsc::channel();
                 let (thread_stop_sender, thread_stop_receiver) = user_signal_channel();
+                let (thead_ready_tx, thread_ready_rx) = mpsc::channel();
 
                 let handle = scope.spawn({
                     let program = program.clone();
@@ -123,17 +131,36 @@ where
                             command_sender,
                             result_receiver,
                             thread_stop_receiver,
+                            thead_ready_tx,
                         )
                     }
                 });
                 handles.push(Some(handle));
                 channels.push(Some((command_receiver, result_sender)));
                 thread_stop_signal_senders.push(Some(thread_stop_sender));
+                thread_ready_chans.push(thread_ready_rx);
+            }
+            // wait for all threads to initialize
+            for thread_ready_rx in thread_ready_chans {
+                if let Err(_) = thread_ready_rx.recv() {
+                    panic!("failed to initialize player thread, PANIK !!");
+                }
             }
 
             let mut next_commands: Vec<PlayerCommandState<PCom>> =
                 vec![PlayerCommandState::None; player_count];
 
+            // log spawn
+            for player in self.player_states.iter() {
+                self.log_writer
+                    .add_log_data(player.log_repr(), "spawn".to_owned(), self.time, 0);
+            }
+            // initial logic setup
+            self.battle_logic.initial_setup();
+
+            //
+            //
+            // main game loop
             let mut start_timestamps = vec![time::Instant::now(); player_count];
             loop {
                 let mut players_that_have_commands = 0;
@@ -145,7 +172,8 @@ where
                     .zip(self.player_death_logged.iter_mut())
                     .enumerate()
                 {
-                    if player.is_dead() && !*death_logged {
+                    if self.battle_logic.is_player_dead(player) && !*death_logged {
+                        // TODO: remove is_dead from player - game logic is responsible for that info
                         next_commands[i] = PlayerCommandState::Finish;
                         self.log_writer.add_log_data(
                             self.player_states[i].log_repr(),
@@ -156,8 +184,24 @@ where
                         *death_logged = true;
                     }
                 }
+                // check if game ended
+                if self.battle_logic.game_finished(&self.player_states) {
+                    for next_command in next_commands.iter_mut() {
+                        // just finalize all players
+                        // this will force their stopping and loop safe exit
+                        if let PlayerCommandState::GotCommand(_, _, _) = next_command {
+                            // we should let pending commands finalize
+                        } else {
+                            *next_command = PlayerCommandState::Finish;
+                        }
+                    }
+                }
 
-                for (i, channels_maybe) in channels.iter().enumerate() {
+                for (i, (channels_maybe, extra_commands_queue)) in channels
+                    .iter()
+                    .zip(player_extra_commands_queues.iter_mut())
+                    .enumerate()
+                {
                     let (command_receiver, _) = if let Some(x) = channels_maybe {
                         x
                     } else {
@@ -170,6 +214,19 @@ where
                         continue;
                     }
 
+                    // first check if there are extra commands queues
+                    if extra_commands_queue.len() > 0 {
+                        let command_id = self.next_command_id;
+                        self.next_command_id += 1;
+                        next_commands[i] = PlayerCommandState::GotCommand(
+                            extra_commands_queue.pop_front().unwrap(),
+                            self.time,
+                            command_id,
+                        );
+                        players_that_have_commands += 1;
+                        continue;
+                    }
+                    // then get new command from the program
                     match command_receiver.try_recv() {
                         Ok(com) => {
                             let command_id = self.next_command_id;
@@ -185,7 +242,7 @@ where
                             // note - operation logged here MAY not complete, depending on concrete game logic
                             self.log_writer.add_log_data(
                                 player_state.log_repr(),
-                                format!("{}:{}", command_id, com.to_log_repr()),
+                                format!("{}({}):start", com.to_log_repr(), command_id),
                                 self.time,
                                 est_duration,
                             );
@@ -252,7 +309,7 @@ where
 
                 // check if everyone is ready
                 if players_that_have_commands == player_count {
-                    // first check if all done
+                    // first check if all done(stopped/dead) -> meaning game ends
                     if next_commands
                         .iter()
                         .all(|x| PlayerCommandState::Finish == *x)
@@ -305,12 +362,17 @@ where
                         //  also we bravely unwrap cuz channels may close only in the start of the loop
                         let reply_channel = &channels[player_i].as_ref().unwrap().1;
 
-                        let reply = self.battle_logic.process_commands(
+                        let (reply, extra_actions_maybe) = self.battle_logic.process_commands(
                             player_i,
                             com,
                             &mut self.player_states,
-                            &mut self.log_writer,  // TODO: not sure if this is needed
+                            &mut |obj, act| {
+                                self.log_writer.add_log_data(obj, act, self.time, 0);
+                            },
                         );
+                        if let Some(extra_actions) = extra_actions_maybe {
+                            player_extra_commands_queues[player_i].extend(extra_actions);
+                        }
 
                         let command_succeeded = reply.command_succeeded();
 
@@ -328,7 +390,12 @@ where
                         // log operation finish
                         self.log_writer.add_log_data(
                             self.player_states[player_i].log_repr(),
-                            format!("{}:{}:{}", command_id, com.to_log_repr(), if command_succeeded {"DONE"} else {"FAILED"}),
+                            format!(
+                                "{}({}):{}",
+                                com.to_log_repr(),
+                                command_id,
+                                if command_succeeded { "done" } else { "failed" }
+                            ),
                             self.time,
                             0,
                         );
@@ -372,6 +439,7 @@ where
         command_channel: mpsc::Sender<PCom>,
         reply_channel: mpsc::Receiver<PComRep>, // PlayerCommandReply<(String, Option<String>)>
         vm_signal_receiver: UserSignalReceiver,
+        thread_ready_signal: mpsc::Sender<()>,
     ) -> Result<(), String> {
         macro_rules! send_command {
             ($vm:ident, $command_channel:ident, $reply_channel:ident, $cmd:expr) => {{
@@ -428,7 +496,13 @@ where
                     return Err(e.to_string());
                 }
             };
+            
+            //
+            // ready to run player code
+            thread_ready_signal.send(()).unwrap();
+            drop(thread_ready_signal);
 
+            // run player code
             if let PyResult::Err(e) = vm.run_code_obj(code_obj, scope) {
                 let mut exc_str = String::new();
                 vm.write_exception(&mut exc_str, &e).unwrap_or_else(|_| {

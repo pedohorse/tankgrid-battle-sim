@@ -1,6 +1,8 @@
+use crate::map::{MapReadAccess, MapWriteAccess};
 use map_lib::MapData;
 use std::{path::Path, vec::Vec};
-use crate::map::{MapReadAccess, MapWriteAccess};
+
+use super::grid_orientation::GridOrientation;
 
 pub struct GridBattleMap<T> {
     width: usize,
@@ -21,7 +23,7 @@ where
         self.map_data.row(y)[x]
     }
     fn is_within_bounds(&self, x: i64, y: i64) -> bool {
-        return x >= 0 && y >= 0 && (x as usize) < self.width && (y as usize) < self.height
+        return x >= 0 && y >= 0 && (x as usize) < self.width && (y as usize) < self.height;
     }
 }
 
@@ -51,7 +53,8 @@ where
     ) -> GridBattleMap<T> {
         let mut row_sizes = Vec::with_capacity(height);
         row_sizes.resize(height, width);
-        let map_data = MapData::new_from_constant_rows(default_tile_type, &row_sizes, out_of_bounds_cell_type);
+        let map_data =
+            MapData::new_from_constant_rows(default_tile_type, &row_sizes, out_of_bounds_cell_type);
         GridBattleMap {
             width,
             height,
@@ -60,9 +63,7 @@ where
     }
 
     /// if map data can not represent grid map - error is returned
-    pub fn new_from_data(
-        map_data: MapData<T>,
-    ) -> Result<GridBattleMap<T>, ()> {
+    pub fn new_from_data(map_data: MapData<T>) -> Result<GridBattleMap<T>, ()> {
         let height = map_data.row_count();
         if height == 0 {
             return Err(());
@@ -85,5 +86,44 @@ where
 
     pub fn map_data(&self) -> &MapData<T> {
         &self.map_data
+    }
+
+    // will fail if map cannot have "count" of player spawn places
+    pub fn get_spawn_locations(
+        &self,
+        count: usize,
+    ) -> Result<Vec<(i64, i64, GridOrientation)>, ()> {
+        match count {
+            0 => Err(()),
+            1 => Ok(vec![(0, 0, GridOrientation::Right)]),
+            2 => Ok(vec![
+                (0, 0, GridOrientation::Right),
+                (
+                    self.width as i64 - 1,
+                    self.height as i64 - 1,
+                    GridOrientation::Left,
+                ),
+            ]),
+            3 => Ok(vec![
+                (0, 0, GridOrientation::Right),
+                (0, self.height as i64 - 1, GridOrientation::Up),
+                (
+                    self.width as i64 - 1,
+                    self.height as i64 - 1,
+                    GridOrientation::Left,
+                ),
+            ]),
+            4 => Ok(vec![
+                (0, 0, GridOrientation::Right),
+                (0, self.height as i64 - 1, GridOrientation::Up),
+                (
+                    self.width as i64 - 1,
+                    self.height as i64 - 1,
+                    GridOrientation::Left,
+                ),
+                (self.width as i64 - 1, 0, GridOrientation::Down),
+            ]),
+            _ => Err(()), // FOR NOW we don't support more
+        }
     }
 }

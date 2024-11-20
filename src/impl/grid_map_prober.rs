@@ -69,6 +69,10 @@ where
 }
 
 impl GridMapProber {
+    pub fn new() -> GridMapProber {
+        GridMapProber {}
+    }
+
     fn raymarch<'a, T, M, L, MObj, OL, F>(
         &self,
         from: (i64, i64),
