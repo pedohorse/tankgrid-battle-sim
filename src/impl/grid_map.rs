@@ -95,33 +95,33 @@ where
     ) -> Result<Vec<(i64, i64, GridOrientation)>, ()> {
         match count {
             0 => Err(()),
-            1 => Ok(vec![(0, 0, GridOrientation::Right)]),
+            1 => Ok(vec![(0, 0, GridOrientation::East)]),
             2 => Ok(vec![
-                (0, 0, GridOrientation::Right),
+                (0, 0, GridOrientation::East),
                 (
                     self.width as i64 - 1,
                     self.height as i64 - 1,
-                    GridOrientation::Left,
+                    GridOrientation::West,
                 ),
             ]),
             3 => Ok(vec![
-                (0, 0, GridOrientation::Right),
-                (0, self.height as i64 - 1, GridOrientation::Up),
+                (0, 0, GridOrientation::East),
+                (0, self.height as i64 - 1, GridOrientation::North),
                 (
                     self.width as i64 - 1,
                     self.height as i64 - 1,
-                    GridOrientation::Left,
+                    GridOrientation::West,
                 ),
             ]),
             4 => Ok(vec![
-                (0, 0, GridOrientation::Right),
-                (0, self.height as i64 - 1, GridOrientation::Up),
+                (0, 0, GridOrientation::East),
+                (0, self.height as i64 - 1, GridOrientation::North),
                 (
                     self.width as i64 - 1,
                     self.height as i64 - 1,
-                    GridOrientation::Left,
+                    GridOrientation::West,
                 ),
-                (self.width as i64 - 1, 0, GridOrientation::Down),
+                (self.width as i64 - 1, 0, GridOrientation::South),
             ]),
             _ => Err(()), // FOR NOW we don't support more
         }

@@ -5,19 +5,19 @@ use crate::script_repr::FromScriptRepr;
 //Copy + Clone + Eq + Hash + Send + 'static + From<String>
 #[derive(PartialEq, Eq, Debug, Clone, Copy, Hash)]
 pub enum GridOrientation {
-    Up,
-    Right,
-    Down,
-    Left,
+    North,
+    East,
+    South,
+    West,
 }
 
 impl FromScriptRepr for GridOrientation {
     fn from_script_repr(from: &str) -> Option<Self> {
         match from {
-            "up" | "north" => Some(GridOrientation::Up),
-            "right" | "east" => Some(GridOrientation::Right),
-            "down" | "south" => Some(GridOrientation::Down),
-            "left" | "west" => Some(GridOrientation::Left),
+            "up" | "north" => Some(GridOrientation::North),
+            "right" | "east" => Some(GridOrientation::East),
+            "down" | "south" => Some(GridOrientation::South),
+            "left" | "west" => Some(GridOrientation::West),
             _ => None,
         }
     }
@@ -26,10 +26,10 @@ impl FromScriptRepr for GridOrientation {
 impl LogRepresentable for GridOrientation {
     fn log_repr(&self) -> String {
         match self {
-            GridOrientation::Up => "north",
-            GridOrientation::Right => "east",
-            GridOrientation::Down => "south",
-            GridOrientation::Left => "west",
+            GridOrientation::North => "north",
+            GridOrientation::East => "east",
+            GridOrientation::South => "south",
+            GridOrientation::West => "west",
         }
         .to_owned()
     }
@@ -43,10 +43,10 @@ impl SimpleOrientation for GridOrientation {
 
     fn opposite_of(&self, other: &Self) -> bool {
         match (self, other) {
-            (GridOrientation::Up, GridOrientation::Down) => true,
-            (GridOrientation::Right, GridOrientation::Left) => true,
-            (GridOrientation::Down, GridOrientation::Up) => true,
-            (GridOrientation::Left, GridOrientation::Right) => true,
+            (GridOrientation::North, GridOrientation::South) => true,
+            (GridOrientation::East, GridOrientation::West) => true,
+            (GridOrientation::South, GridOrientation::North) => true,
+            (GridOrientation::West, GridOrientation::East) => true,
             _ => false,
         }
     }
@@ -54,20 +54,20 @@ impl SimpleOrientation for GridOrientation {
     fn left_of(&self, other: &Self) -> bool {
         // self is to the left from other
         match self {
-            GridOrientation::Up => if let GridOrientation::Right|GridOrientation::Down = other { true } else { false },
-            GridOrientation::Right => if let GridOrientation::Down|GridOrientation::Left = other { true } else { false },
-            GridOrientation::Down => if let GridOrientation::Left|GridOrientation::Up = other { true } else { false },
-            GridOrientation::Left => if let GridOrientation::Up|GridOrientation::Right = other { true } else { false },
+            GridOrientation::North => if let GridOrientation::East|GridOrientation::South = other { true } else { false },
+            GridOrientation::East => if let GridOrientation::South|GridOrientation::West = other { true } else { false },
+            GridOrientation::South => if let GridOrientation::West|GridOrientation::North = other { true } else { false },
+            GridOrientation::West => if let GridOrientation::North|GridOrientation::East = other { true } else { false },
         }
     }
 
     fn right_of(&self, other: &Self) -> bool {
         // self is to the right from other
         match self {
-            GridOrientation::Up => if let GridOrientation::Left|GridOrientation::Down = other { true } else { false },
-            GridOrientation::Right => if let GridOrientation::Up|GridOrientation::Left = other { true } else { false },
-            GridOrientation::Down => if let GridOrientation::Right|GridOrientation::Up = other { true } else { false },
-            GridOrientation::Left => if let GridOrientation::Down|GridOrientation::Right = other { true } else { false },
+            GridOrientation::North => if let GridOrientation::West|GridOrientation::South = other { true } else { false },
+            GridOrientation::East => if let GridOrientation::North|GridOrientation::West = other { true } else { false },
+            GridOrientation::South => if let GridOrientation::East|GridOrientation::North = other { true } else { false },
+            GridOrientation::West => if let GridOrientation::South|GridOrientation::East = other { true } else { false },
         }
     }
 }

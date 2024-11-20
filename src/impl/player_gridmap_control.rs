@@ -45,10 +45,10 @@ impl PlayerControl for GridPlayerState
 {
     fn forward_pos(&self) -> (i64, i64) {
         match self.orientation {
-            GridOrientation::Up => (self.col, self.row - 1),
-            GridOrientation::Right => (self.col + 1, self.row),
-            GridOrientation::Down => (self.col, self.row + 1),
-            GridOrientation::Left => (self.col - 1, self.row),
+            GridOrientation::North => (self.col, self.row - 1),
+            GridOrientation::East => (self.col + 1, self.row),
+            GridOrientation::South => (self.col, self.row + 1),
+            GridOrientation::West => (self.col - 1, self.row),
         }
     }
 
@@ -60,34 +60,34 @@ impl PlayerControl for GridPlayerState
 
     fn turn_cw(&mut self) {
         match self.orientation {
-            GridOrientation::Up => {
-                self.orientation = GridOrientation::Right;
+            GridOrientation::North => {
+                self.orientation = GridOrientation::East;
             }
-            GridOrientation::Right => {
-                self.orientation = GridOrientation::Down;
+            GridOrientation::East => {
+                self.orientation = GridOrientation::South;
             }
-            GridOrientation::Down => {
-                self.orientation = GridOrientation::Left;
+            GridOrientation::South => {
+                self.orientation = GridOrientation::West;
             }
-            GridOrientation::Left => {
-                self.orientation = GridOrientation::Up;
+            GridOrientation::West => {
+                self.orientation = GridOrientation::North;
             }
         }
     }
 
     fn turn_ccw(&mut self) {
         match self.orientation {
-            GridOrientation::Up => {
-                self.orientation = GridOrientation::Left;
+            GridOrientation::North => {
+                self.orientation = GridOrientation::West;
             }
-            GridOrientation::Right => {
-                self.orientation = GridOrientation::Up;
+            GridOrientation::East => {
+                self.orientation = GridOrientation::North;
             }
-            GridOrientation::Down => {
-                self.orientation = GridOrientation::Right;
+            GridOrientation::South => {
+                self.orientation = GridOrientation::East;
             }
-            GridOrientation::Left => {
-                self.orientation = GridOrientation::Down;
+            GridOrientation::West => {
+                self.orientation = GridOrientation::South;
             }
         }
     }

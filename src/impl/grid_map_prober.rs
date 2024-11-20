@@ -96,16 +96,16 @@ impl GridMapProber {
         let (mut x, mut y) = from;
         for _ in 0..MAX_LOOK_DIST {
             match orientation {
-                GridOrientation::Up => {
+                GridOrientation::North => {
                     y -= 1;
                 }
-                GridOrientation::Right => {
+                GridOrientation::East => {
                     x += 1;
                 }
-                GridOrientation::Down => {
+                GridOrientation::South => {
                     y += 1;
                 }
-                GridOrientation::Left => {
+                GridOrientation::West => {
                     x -= 1;
                 }
             };

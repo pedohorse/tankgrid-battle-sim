@@ -47,10 +47,10 @@ where
             HashMap::from([
                 (PlayerCommand::TurnCW, 10),
                 (PlayerCommand::MoveFwd, 20),
-                (PlayerCommand::Look(GridOrientation::Up), 5),
-                (PlayerCommand::Look(GridOrientation::Right), 5),
-                (PlayerCommand::Look(GridOrientation::Down), 5),
-                (PlayerCommand::Look(GridOrientation::Left), 5),
+                (PlayerCommand::Look(GridOrientation::North), 5),
+                (PlayerCommand::Look(GridOrientation::East), 5),
+                (PlayerCommand::Look(GridOrientation::South), 5),
+                (PlayerCommand::Look(GridOrientation::West), 5),
             ]),
             0,
         ),
@@ -68,7 +68,7 @@ fn test_look_out_bounds() {
     test_base(
         vec![
             (
-                GridPlayerState::new(20, 10, GridOrientation::Down, 0, 1, "player1"),
+                GridPlayerState::new(20, 10, GridOrientation::South, 0, 1, "player1"),
                 "\
 print('hell-o')\n
 turn_cw()\n
@@ -79,7 +79,7 @@ print('yeah!')\n
                 .to_owned(),
             ),
             (
-                GridPlayerState::new(20, 5, GridOrientation::Right, 0, 1, "player2"),
+                GridPlayerState::new(20, 5, GridOrientation::East, 0, 1, "player2"),
                 "\
 print('second')\n
 looked = look('south')\n
@@ -106,7 +106,7 @@ fn test_look_on_map() {
     test_base(
         vec![
             (
-                GridPlayerState::new(4, 7, GridOrientation::Right, 0, 1, "player1"),
+                GridPlayerState::new(4, 7, GridOrientation::East, 0, 1, "player1"),
                 "\
 wait()\n
 move_forward()\n
@@ -115,7 +115,7 @@ print('yeah!')\n
                 .to_owned(),
             ),
             (
-                GridPlayerState::new(4, 2, GridOrientation::Right, 0, 1, "player2"),
+                GridPlayerState::new(4, 2, GridOrientation::East, 0, 1, "player2"),
                 "\
 print('second')\n
 looked = look('south')\n
