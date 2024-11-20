@@ -106,9 +106,12 @@ where
         &self.log_writer
     }
 
-    pub fn run_simulation(&mut self) {
+    /// returns indices of winner players
+    /// if sim ended in an error - there are no winners, so None is returned
+    pub fn run_simulation(&mut self) -> Option<Vec<usize>> {
         self.time = 0;
         let player_count = self.player_programs.len();
+        let mut winner_ids = None;
 
         thread::scope(|scope| {
             let mut handles = Vec::with_capacity(player_count);
@@ -184,8 +187,19 @@ where
                         *death_logged = true;
                     }
                 }
+
                 // check if game ended
-                if self.battle_logic.game_finished(&self.player_states) {
+                if let None = winner_ids {
+                    if let Some(winners) = self.battle_logic.game_finished(&self.player_states) {
+                        winner_ids = Some(winners);
+                        // log victory
+                        for winner_id in winner_ids.as_ref().unwrap() {
+                            self.log_writer.add_log_data(self.player_states[*winner_id].log_repr(), "won".to_owned(), self.time, 0);
+                        }
+                    }
+                }
+                // if game is ended - we allow pending commands to finalize and enforce Finish state
+                if let Some(_) = winner_ids {
                     for next_command in next_commands.iter_mut() {
                         // just finalize all players
                         // this will force their stopping and loop safe exit
@@ -426,6 +440,7 @@ where
                 }
             }
         });
+        winner_ids
     }
 
     ///

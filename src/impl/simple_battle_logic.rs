@@ -1,5 +1,5 @@
-use crate::command_and_reply::CommandReplyStat;
 use crate::battle_logic::BattleLogic;
+use crate::command_and_reply::CommandReplyStat;
 use crate::gametime::GameTime;
 use crate::log_data::LogRepresentable;
 use crate::map::MapReadAccess;
@@ -177,9 +177,20 @@ where
         player.resource_value(HEALTH_RES) <= 0
     }
 
-    fn game_finished(&self, players: &[P]) -> bool {
+    fn game_finished(&self, players: &[P]) -> Option<Vec<usize>> {
         // default impl returns true when only single player left
-        players.iter().filter(|p| !self.is_player_dead(*p)).count() <= self.player_count_to_win
+        if players.iter().filter(|p| !self.is_player_dead(*p)).count() <= self.player_count_to_win {
+            Some(
+                players
+                    .iter()
+                    .enumerate()
+                    .filter(|(_, p)| self.is_player_dead(*p))
+                    .map(|(i, _)| i)
+                    .collect(),
+            )
+        } else {
+            None
+        }
     }
 
     fn process_commands<LWF>(
@@ -473,7 +484,8 @@ where
     }
 
     fn recreate_objects_layer<P>(&mut self, player_states: &[P])
-    where // TODO: player does NOT have to impl MapObject
+    where
+        // TODO: player does NOT have to impl MapObject
         P: PlayerControl + MapObject<R> + ToScriptRepr,
     {
         // clear player cache

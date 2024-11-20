@@ -13,7 +13,9 @@ where
 {
     fn is_player_dead(&self, player: &P) -> bool;
 
-    fn game_finished(&self, players: &[P]) -> bool;
+    /// return None if game still goes on
+    /// or Some(winner ids) if game is finished
+    fn game_finished(&self, players: &[P]) -> Option<Vec<usize>>;
 
     fn initial_setup(&mut self) {}
 
