@@ -3,23 +3,27 @@ use battle_sim::r#impl::buf_battle_logger::BufferLogWriter;
 use battle_sim::r#impl::grid_battle::{GridBattle, GridPlayerState};
 use battle_sim::r#impl::grid_map::GridBattleMap;
 use battle_sim::r#impl::grid_map_prober::GridMapProber;
-use battle_sim::r#impl::simple_battle_logic::PlayerCommand;
-use battle_sim::r#impl::simple_battle_logic::{SimpleBattleLogic, CommandTimer};
-use battle_sim::r#impl::tile_types_logic::TileTypeLogic;
 use battle_sim::r#impl::grid_orientation::GridOrientation;
+use battle_sim::r#impl::simple_battle_logic::PlayerCommand;
+use battle_sim::r#impl::simple_battle_logic::{CommandTimer, SimpleBattleLogic};
+use battle_sim::r#impl::tile_types_logic::TileTypeLogic;
 use battle_sim::r#impl::trivial_object_layer::TrivialObjectLayer;
 use battle_sim::serialization::FromFile;
 
 use std::collections::HashMap;
 use std::env::args;
-use std::io::{self, stdout, Error, ErrorKind, Read, Result};
+use std::fs::File;
+use std::io::{self, stdout, Error, ErrorKind, Read, Result, Write};
 use std::path::PathBuf;
 use std::process::ExitCode;
 
 struct CommandTimings {}
 
 impl CommandTimer<PlayerCommand<GridOrientation>> for CommandTimings {
-    fn get_base_duration(&self, command: &PlayerCommand<GridOrientation>) -> battle_sim::gametime::GameTime {
+    fn get_base_duration(
+        &self,
+        command: &PlayerCommand<GridOrientation>,
+    ) -> battle_sim::gametime::GameTime {
         match command {
             PlayerCommand::MoveFwd => 10,
             PlayerCommand::TurnCW => 15,
@@ -33,10 +37,10 @@ impl CommandTimer<PlayerCommand<GridOrientation>> for CommandTimings {
     }
 }
 
-
 struct Config {
     map_path: PathBuf,
     player_programs: Vec<PathBuf>,
+    log_path: Option<PathBuf>,
 }
 
 fn main() -> ExitCode {
@@ -60,7 +64,18 @@ fn main() -> ExitCode {
         }
     };
 
-    let logger = BufferLogWriter::new(io::BufWriter::new(stdout()));
+    let logger = BufferLogWriter::new(io::BufWriter::new({
+        if let Some(path) = config.log_path {
+            if let Ok(file) = File::create(path) {
+                Box::new(file) as Box<dyn Write>
+            } else {
+                eprintln!("failed to create battle log file");
+                return ExitCode::from(1);
+            }
+        } else {
+            Box::new(stdout()) as Box<dyn Write>
+        }
+    }));
 
     let mut player_initial_data = Vec::with_capacity(config.player_programs.len());
     let player_initial_placements = match map.get_spawn_locations(config.player_programs.len()) {
@@ -115,28 +130,40 @@ fn main() -> ExitCode {
 }
 
 enum ArgsState {
-    MapPath,
+    FlagOrMapPath,
     PlayerProgram,
     PlayerProgramOrDone,
+    BattleLogPath,
 }
 
 fn parse_args() -> Result<Config> {
-    let mut state = ArgsState::MapPath;
+    let mut state = ArgsState::FlagOrMapPath;
     let mut config = Config {
         map_path: PathBuf::new(),
         player_programs: Vec::new(),
+        log_path: None,
     };
 
     let args = args().skip(1);
     for arg in args {
         match state {
-            ArgsState::MapPath => {
-                config.map_path = PathBuf::from(arg);
-                state = ArgsState::PlayerProgram;
-            }
+            ArgsState::FlagOrMapPath => match arg.as_str() {
+                "-o" | "--output" => {
+                    state = ArgsState::BattleLogPath;
+                    continue;
+                }
+                arg => {
+                    config.map_path = PathBuf::from(arg);
+                    state = ArgsState::PlayerProgram;
+                }
+            },
             ArgsState::PlayerProgram | ArgsState::PlayerProgramOrDone => {
                 config.player_programs.push(PathBuf::from(arg));
                 state = ArgsState::PlayerProgramOrDone;
+            }
+            ArgsState::BattleLogPath => {
+                config.log_path = Some(PathBuf::from(arg));
+                state = ArgsState::FlagOrMapPath;
             }
         }
     }
