@@ -18,6 +18,15 @@ where
     MObj: MapObject<GridOrientation>,
     OL: ObjectLayer<GridOrientation, MObj>,
 {
+    fn step_in_direction(&self, pos: (i64, i64), ori: GridOrientation) -> (i64, i64) {
+        match ori {
+            GridOrientation::North => (pos.0, pos.1 - 1),
+            GridOrientation::East => (pos.0 + 1, pos.1),
+            GridOrientation::South => (pos.0, pos.1 + 1),
+            GridOrientation::West => (pos.0 - 1, pos.1),
+        }
+    }
+
     fn look<'a>(
         &self,
         from: (i64, i64),

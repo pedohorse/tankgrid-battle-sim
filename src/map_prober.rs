@@ -6,7 +6,9 @@ where
     R: Sized,
     MObj: MapObject<R>,
     OL: ObjectLayer<R, MObj>,
-{
+{   
+    fn step_in_direction(&self, pos: (i64, i64), ori: R) -> (i64, i64);
+
     fn raycast(
         &self,
         from: (i64, i64),

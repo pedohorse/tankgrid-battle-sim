@@ -3,8 +3,10 @@ use battle_sim::r#impl::buf_battle_logger::BufferLogWriter;
 use battle_sim::r#impl::grid_battle::{GridBattle, GridPlayerState};
 use battle_sim::r#impl::grid_map::GridBattleMap;
 use battle_sim::r#impl::grid_map_prober::GridMapProber;
-use battle_sim::r#impl::simple_battle_logic::SimpleBattleLogic;
+use battle_sim::r#impl::simple_battle_logic::PlayerCommand;
+use battle_sim::r#impl::simple_battle_logic::{SimpleBattleLogic, CommandTimer};
 use battle_sim::r#impl::tile_types_logic::TileTypeLogic;
+use battle_sim::r#impl::grid_orientation::GridOrientation;
 use battle_sim::r#impl::trivial_object_layer::TrivialObjectLayer;
 use battle_sim::serialization::FromFile;
 
@@ -13,6 +15,24 @@ use std::env::args;
 use std::io::{self, stdout, Error, ErrorKind, Read, Result};
 use std::path::PathBuf;
 use std::process::ExitCode;
+
+struct CommandTimings {}
+
+impl CommandTimer<PlayerCommand<GridOrientation>> for CommandTimings {
+    fn get_base_duration(&self, command: &PlayerCommand<GridOrientation>) -> battle_sim::gametime::GameTime {
+        match command {
+            PlayerCommand::MoveFwd => 10,
+            PlayerCommand::TurnCW => 15,
+            PlayerCommand::TurnCCW => 15,
+            PlayerCommand::Shoot => 5,
+            PlayerCommand::Look(_) => 4,
+            PlayerCommand::Wait => 5,
+            PlayerCommand::AddAmmo(_) => 2,
+            PlayerCommand::AddHealth(_) => 2,
+        }
+    }
+}
+
 
 struct Config {
     map_path: PathBuf,
@@ -50,10 +70,8 @@ fn main() -> ExitCode {
             return ExitCode::from(1);
         }
     };
-    for (player_program_file, (x, y, ori)) in config
-        .player_programs
-        .iter()
-        .zip(player_initial_placements)
+    for (player_program_file, (x, y, ori)) in
+        config.player_programs.iter().zip(player_initial_placements)
     {
         let mut file = match std::fs::File::open(&player_program_file) {
             Ok(x) => x,
@@ -87,7 +105,7 @@ fn main() -> ExitCode {
         TileTypeLogic::new(),
         GridMapProber::new(),
         TrivialObjectLayer::new(),
-        HashMap::new(),
+        CommandTimings {},
         1,
     );
     let mut battle = GridBattle::new(game_logic, player_initial_data, logger);

@@ -17,7 +17,11 @@ where
     /// or Some(winner ids) if game is finished
     fn game_finished(&self, players: &[P]) -> Option<Vec<usize>>;
 
-    fn initial_setup(&mut self) {}
+    fn initial_setup<LWF>(&mut self, player_states: &mut [P], logger: &mut LWF)
+    where
+        LWF: FnMut(LO, LA),
+    {
+    }
 
     fn process_commands<LWF>(
         &mut self,

@@ -1,6 +1,10 @@
+use std::collections::HashMap;
+use std::hash::Hash;
+
 use battle_sim::gametime::GameTime;
 use battle_sim::log_data::{LogRepresentable, LogWriter};
 use battle_sim::maptile_logic::MaptileLogic;
+use battle_sim::r#impl::simple_battle_logic::CommandTimer;
 use battle_sim::script_repr::ToScriptRepr;
 
 #[derive(Clone, Copy)]
@@ -14,7 +18,8 @@ impl ToScriptRepr for SimpleTileType {
         match self {
             SimpleTileType::Nothin => "empty_tile",
             SimpleTileType::Wall => "wall",
-        }.to_owned()
+        }
+        .to_owned()
     }
 }
 
@@ -117,5 +122,32 @@ impl MaptileLogic<SimpleTileType> for TestSimpleLogic {
     }
     fn shoot(&self, tile: SimpleTileType) -> SimpleTileType {
         tile
+    }
+}
+
+pub struct HashmapCommandTimer<PC> {
+    durations: HashMap<PC, GameTime>,
+    default: GameTime,
+}
+
+impl<PC> CommandTimer<PC> for HashmapCommandTimer<PC>
+where
+    PC: Eq + Hash,
+{
+    fn get_base_duration(&self, command: &PC) -> GameTime {
+        if let Some(val) = self.durations.get(command) {
+            *val
+        } else {
+            self.default
+        }
+    }
+}
+
+impl<PC> HashmapCommandTimer<PC> {
+    pub fn new(hashmap: HashMap<PC, GameTime>, default: GameTime) -> HashmapCommandTimer<PC>{
+        HashmapCommandTimer {
+            durations: hashmap,
+            default
+        }
     }
 }

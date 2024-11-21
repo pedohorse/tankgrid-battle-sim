@@ -12,7 +12,7 @@ use battle_sim::r#impl::trivial_object_layer::TrivialObjectLayer;
 use std::collections::HashMap;
 
 mod common;
-use common::{SimpleTileType, TestTrivialLogic, VecLogWriter};
+use common::{SimpleTileType, TestTrivialLogic, VecLogWriter, HashmapCommandTimer};
 
 struct TestNoObjectCache {}
 
@@ -54,7 +54,7 @@ fn testtest() {
             TestTrivialLogic {},
             GridMapProber {},
             TrivialObjectLayer::new(),
-            HashMap::new(),
+            HashmapCommandTimer::new(HashMap::new(), 10),
             0,
         ),
         vec![(
@@ -85,11 +85,11 @@ fn test2players() {
             TestTrivialLogic {},
             GridMapProber {},
             TrivialObjectLayer::new(),
-            HashMap::from([
+            HashmapCommandTimer::new(HashMap::from([
                 (PlayerCommand::MoveFwd, 100),
                 (PlayerCommand::TurnCW, 10),
                 (PlayerCommand::MoveFwd, 20),
-            ]),
+            ]), 10),
             0,
         ),
         vec![
@@ -140,11 +140,11 @@ fn test_2players_move_into_each_other() {
             TestTrivialLogic {},
             GridMapProber {},
             TrivialObjectLayer::new(),
-            HashMap::from([
+            HashmapCommandTimer::new(HashMap::from([
                 (PlayerCommand::MoveFwd, 100),
                 (PlayerCommand::TurnCW, 10),
                 (PlayerCommand::MoveFwd, 20),
-            ]),
+            ]), 10),
             0,
         ),
         vec![
@@ -196,11 +196,11 @@ fn test_2players_move_past_each_other() {
             TestTrivialLogic {},
             GridMapProber {},
             TrivialObjectLayer::new(),
-            HashMap::from([
+            HashmapCommandTimer::new(HashMap::from([
                 (PlayerCommand::MoveFwd, 100),
                 (PlayerCommand::TurnCW, 10),
                 (PlayerCommand::MoveFwd, 20),
-            ]),
+            ]), 10),
             0,
         ),
         vec![
@@ -252,12 +252,12 @@ fn test_2players_move_into_each_other_but_shoot() {
             TestTrivialLogic {},
             GridMapProber {},
             TrivialObjectLayer::new(),
-            HashMap::from([
+            HashmapCommandTimer::new(HashMap::from([
                 (PlayerCommand::MoveFwd, 100),
                 (PlayerCommand::TurnCW, 10),
                 (PlayerCommand::MoveFwd, 20),
                 (PlayerCommand::Shoot, 5),
-            ]),
+            ]), 10),
             0,
         ),
         vec![
@@ -318,11 +318,11 @@ fn test2players_inf_loop() {
             TestTrivialLogic {},
             GridMapProber {},
             TrivialObjectLayer::new(),
-            HashMap::from([
+            HashmapCommandTimer::new(HashMap::from([
                 (PlayerCommand::MoveFwd, 100),
                 (PlayerCommand::TurnCW, 10),
                 (PlayerCommand::MoveFwd, 20),
-            ]),
+            ]), 10),
             0,
         ),
         vec![
@@ -365,11 +365,11 @@ fn test2players_bad_inf_loop() {
             TestTrivialLogic {},
             GridMapProber {},
             TrivialObjectLayer::new(),
-            HashMap::from([
+            HashmapCommandTimer::new(HashMap::from([
                 (PlayerCommand::MoveFwd, 100),
                 (PlayerCommand::TurnCW, 10),
                 (PlayerCommand::MoveFwd, 20),
-            ]),
+            ]), 10),
             0,
         ),
         vec![

@@ -153,13 +153,11 @@ where
             let mut next_commands: Vec<PlayerCommandState<PCom>> =
                 vec![PlayerCommandState::None; player_count];
 
-            // log spawn
-            for player in self.player_states.iter() {
-                self.log_writer
-                    .add_log_data(player.log_repr(), "spawn".to_owned(), self.time, 0);
-            }
             // initial logic setup
-            self.battle_logic.initial_setup();
+            self.battle_logic
+                .initial_setup(&mut self.player_states, &mut |obj, act| {
+                    self.log_writer.add_log_data(obj, act, self.time, 0);
+                });
 
             //
             //
@@ -180,7 +178,7 @@ where
                         next_commands[i] = PlayerCommandState::Finish;
                         self.log_writer.add_log_data(
                             self.player_states[i].log_repr(),
-                            "dies".to_owned(),
+                            "died".to_owned(),
                             self.time,
                             0,
                         );
@@ -194,7 +192,12 @@ where
                         winner_ids = Some(winners);
                         // log victory
                         for winner_id in winner_ids.as_ref().unwrap() {
-                            self.log_writer.add_log_data(self.player_states[*winner_id].log_repr(), "won".to_owned(), self.time, 0);
+                            self.log_writer.add_log_data(
+                                self.player_states[*winner_id].log_repr(),
+                                "won".to_owned(),
+                                self.time,
+                                0,
+                            );
                         }
                     }
                 }
@@ -505,6 +508,11 @@ where
                 }
             });
 
+            //
+            // ready to run player code
+            thread_ready_signal.send(()).unwrap();
+            drop(thread_ready_signal);
+
             let code_obj = match vm.compile(&program, compiler::Mode::Exec, "<embedded>".to_owned())
             {
                 Ok(x) => x,
@@ -512,11 +520,6 @@ where
                     return Err(e.to_string());
                 }
             };
-            
-            //
-            // ready to run player code
-            thread_ready_signal.send(()).unwrap();
-            drop(thread_ready_signal);
 
             // run player code
             if let PyResult::Err(e) = vm.run_code_obj(code_obj, scope) {

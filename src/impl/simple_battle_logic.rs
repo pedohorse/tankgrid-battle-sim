@@ -19,8 +19,6 @@ use rustpython_vm::convert::ToPyObject;
 use rustpython_vm::scope::Scope;
 use rustpython_vm::{PyResult, VirtualMachine};
 
-pub const DEFAULT_COMMAND_DURATION: GameTime = 10;
-
 #[derive(Clone, Copy, PartialEq, Eq, Hash)]
 pub enum PlayerCommand<R> {
     MoveFwd,
@@ -85,6 +83,10 @@ impl LogRepresentable for ObjectCacheType {
     }
 }
 
+pub trait CommandTimer<PC> {
+    fn get_base_duration(&self, command: &PC) -> GameTime;
+}
+
 pub struct ObjectCacheRepr<R> {
     uid: u64,
     obj_type: ObjectCacheType,
@@ -133,18 +135,19 @@ impl<R> LogRepresentable for ObjectCacheRepr<R> {
     }
 }
 
-pub struct SimpleBattleLogic<T, M, L, Pr, R, OLayer>
+pub struct SimpleBattleLogic<T, M, L, Pr, R, OLayer, Fdur>
 where
     L: MaptileLogic<T>,
     M: MapReadAccess<T>,
     Pr: MapProber<T, R, M, L, ObjectCacheRepr<R>, OLayer>,
     R: Copy,
     OLayer: ObjectLayer<R, ObjectCacheRepr<R>>,
+    Fdur: CommandTimer<PlayerCommand<R>>,
 {
     map: M,
     logic: L,
     map_prober: Pr,
-    command_durations: HashMap<PlayerCommand<R>, GameTime>,
+    command_duration: Fdur,
     object_layer: OLayer,
     player_count_to_win: usize,
     _marker0: PhantomData<R>,
@@ -154,8 +157,9 @@ where
 const HEALTH_RES: usize = 0;
 const AMMO_RES: usize = 1;
 
-impl<T, M, L, R, P, Pr, OLayer> BattleLogic<P, PlayerCommand<R>, PlayerCommandReply, String, String>
-    for SimpleBattleLogic<T, M, L, Pr, R, OLayer>
+impl<T, M, L, R, P, Pr, OLayer, Fdur>
+    BattleLogic<P, PlayerCommand<R>, PlayerCommandReply, String, String>
+    for SimpleBattleLogic<T, M, L, Pr, R, OLayer, Fdur>
 where
     T: Copy + Clone + Send + ToScriptRepr,
     L: MaptileLogic<T>,
@@ -172,6 +176,7 @@ where
     OLayer: ObjectLayer<R, ObjectCacheRepr<R>>,
     P: PlayerControl + MapObject<R> + ToScriptRepr + LogRepresentable,
     Pr: MapProber<T, R, M, L, ObjectCacheRepr<R>, OLayer>,
+    Fdur: CommandTimer<PlayerCommand<R>>,
 {
     fn is_player_dead(&self, player: &P) -> bool {
         player.resource_value(HEALTH_RES) <= 0
@@ -179,17 +184,31 @@ where
 
     fn game_finished(&self, players: &[P]) -> Option<Vec<usize>> {
         // default impl returns true when only single player left
-        if players.iter().filter(|p| !self.is_player_dead(*p)).count() <= self.player_count_to_win {
-            Some(
-                players
-                    .iter()
-                    .enumerate()
-                    .filter(|(_, p)| self.is_player_dead(*p))
-                    .map(|(i, _)| i)
-                    .collect(),
-            )
+        let maybe_winners: Vec<usize> = players
+            .iter()
+            .enumerate()
+            .filter(|(_, p)| !self.is_player_dead(*p))
+            .map(|(i, _)| i)
+            .collect();
+        if maybe_winners.len() <= self.player_count_to_win {
+            Some(maybe_winners)
         } else {
             None
+        }
+    }
+
+    fn initial_setup<LWF>(&mut self, player_states: &mut [P], logger: &mut LWF)
+    where
+        LWF: FnMut(String, String),
+    {
+        // log spawn
+        for player in player_states.iter() {
+            let (x, y) = player.position();
+            let ori = player.orientation();
+            logger(
+                player.log_repr(),
+                format!("spawn[{},{},{}]", x, y, ori.log_repr()),
+            );
         }
     }
 
@@ -209,14 +228,16 @@ where
                 let player_state = &mut player_states[player_i];
                 let mut extra_commands = None;
 
-                let (fwd_pos_x, fwd_pos_y) = player_state.forward_pos();
+                let (fwd_pos_x, fwd_pos_y) = self
+                    .map_prober
+                    .step_in_direction(player_state.position(), player_state.orientation());
                 let tile = self.map.get_tile_at(fwd_pos_x, fwd_pos_y);
                 let reply = if self.logic.passable(tile)
                     && self
                         .object_layer
                         .objects_at_are_passable(fwd_pos_x, fwd_pos_y)
                 {
-                    player_state.move_forward();
+                    player_state.move_to((fwd_pos_x, fwd_pos_y));
 
                     // pick up pickable objects
 
@@ -347,30 +368,27 @@ where
     }
 
     fn get_command_duration(&self, player_state: &P, com: &PlayerCommand<R>) -> GameTime {
-        if let Some(dur) = self.command_durations.get(com) {
-            let tile = {
-                let (x, y) = player_state.position();
-                self.map.get_tile_at(x, y)
-            };
-            let speed_percentage = match com {
-                PlayerCommand::MoveFwd => self.logic.pass_speed_percentage(tile),
-                PlayerCommand::TurnCW | PlayerCommand::TurnCCW => {
-                    self.logic.turn_speed_percentage(tile)
-                }
-                _ => 100,
-            };
-            // speed = 0 means we misconfigured something
-            let speed_percentage = if speed_percentage == 0 {
-                eprintln!("[WARNING] tile speed == 0, seems like a misconfiguration, ignoring");
-                100
-            } else {
-                speed_percentage
-            };
-
-            (*dur * 100) / (speed_percentage as usize)
+        let dur = self.command_duration.get_base_duration(com);
+        let tile = {
+            let (x, y) = player_state.position();
+            self.map.get_tile_at(x, y)
+        };
+        let speed_percentage = match com {
+            PlayerCommand::MoveFwd => self.logic.pass_speed_percentage(tile),
+            PlayerCommand::TurnCW | PlayerCommand::TurnCCW => {
+                self.logic.turn_speed_percentage(tile)
+            }
+            _ => 100,
+        };
+        // speed = 0 means we misconfigured something
+        let speed_percentage = if speed_percentage == 0 {
+            eprintln!("[WARNING] tile speed == 0, seems like a misconfiguration, ignoring");
+            100
         } else {
-            DEFAULT_COMMAND_DURATION
-        }
+            speed_percentage
+        };
+
+        (dur * 100) / (speed_percentage as usize)
     }
 
     fn initialize_scope<FSR>(vm: &VirtualMachine, scope: &Scope, comm_chan: FSR)
@@ -458,7 +476,7 @@ where
     }
 }
 
-impl<T, M, L, Pr, R, OLayer> SimpleBattleLogic<T, M, L, Pr, R, OLayer>
+impl<T, M, L, Pr, R, OLayer, Fdur> SimpleBattleLogic<T, M, L, Pr, R, OLayer, Fdur>
 where
     T: Copy + Clone + Send + ToScriptRepr,
     L: MaptileLogic<T>,
@@ -466,21 +484,22 @@ where
     Pr: MapProber<T, R, M, L, ObjectCacheRepr<R>, OLayer>,
     R: Copy + Clone + Eq + Hash + Send + 'static + FromScriptRepr,
     OLayer: ObjectLayer<R, ObjectCacheRepr<R>>,
+    Fdur: CommandTimer<PlayerCommand<R>>,
 {
     pub fn new(
         map: M,
         logic: L,
         map_prober: Pr,
         object_layer: OLayer,
-        command_durations: HashMap<PlayerCommand<R>, GameTime>,
+        command_duration: Fdur,
         player_count_to_win: usize,
-    ) -> SimpleBattleLogic<T, M, L, Pr, R, OLayer> {
+    ) -> SimpleBattleLogic<T, M, L, Pr, R, OLayer, Fdur> {
         SimpleBattleLogic {
             map,
             logic,
             map_prober,
             object_layer,
-            command_durations,
+            command_duration,
             player_count_to_win,
             _marker0: PhantomData,
             _marker1: PhantomData,

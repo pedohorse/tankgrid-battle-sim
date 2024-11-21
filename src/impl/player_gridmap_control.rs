@@ -43,19 +43,9 @@ impl GridPlayerState {
 
 impl PlayerControl for GridPlayerState
 {
-    fn forward_pos(&self) -> (i64, i64) {
-        match self.orientation {
-            GridOrientation::North => (self.col, self.row - 1),
-            GridOrientation::East => (self.col + 1, self.row),
-            GridOrientation::South => (self.col, self.row + 1),
-            GridOrientation::West => (self.col - 1, self.row),
-        }
-    }
-
-    fn move_forward(&mut self) {
-        let (x, y) = self.forward_pos();
-        self.col = x;
-        self.row = y;
+    fn move_to(&mut self, pos: (i64, i64)) {
+        self.col = pos.0;
+        self.row = pos.1;
     }
 
     fn turn_cw(&mut self) {
