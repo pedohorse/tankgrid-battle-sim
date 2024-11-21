@@ -25,7 +25,7 @@ use rustpython_vm::{
 #[derive(Clone, Copy, PartialEq)]
 pub enum PlayerCommandState<PC> {
     None,
-    GotCommand(PC, GameTime, usize),
+    GotCommand(PC, GameTime, GameTime, usize),
     Finish,
 }
 
@@ -34,9 +34,9 @@ impl<PC> PlayerCommandState<PC> {
         mem::replace(self, PlayerCommandState::None)
     }
 
-    pub fn unwrap(self) -> (PC, GameTime, usize) {
-        if let PlayerCommandState::GotCommand(c, t, c_id) = self {
-            (c, t, c_id)
+    pub fn unwrap(self) -> (PC, GameTime, GameTime, usize) {
+        if let PlayerCommandState::GotCommand(c, t, dur, c_id) = self {
+            (c, t, dur, c_id)
         } else {
             panic!("unwrap failed!");
         }
@@ -178,7 +178,7 @@ where
                         next_commands[i] = PlayerCommandState::Finish;
                         self.log_writer.add_log_data(
                             self.player_states[i].log_repr(),
-                            "died".to_owned(),
+                            "die".to_owned(),
                             self.time,
                             0,
                         );
@@ -194,7 +194,7 @@ where
                         for winner_id in winner_ids.as_ref().unwrap() {
                             self.log_writer.add_log_data(
                                 self.player_states[*winner_id].log_repr(),
-                                "won".to_owned(),
+                                "win".to_owned(),
                                 self.time,
                                 0,
                             );
@@ -206,7 +206,7 @@ where
                     for next_command in next_commands.iter_mut() {
                         // just finalize all players
                         // this will force their stopping and loop safe exit
-                        if let PlayerCommandState::GotCommand(_, _, _) = next_command {
+                        if let PlayerCommandState::GotCommand(_, _, _, _) = next_command {
                             // we should let pending commands finalize
                         } else {
                             *next_command = PlayerCommandState::Finish;
@@ -226,7 +226,7 @@ where
                         players_that_have_commands += 1;
                         continue;
                     };
-                    if let PlayerCommandState::GotCommand(_, _, _) = next_commands[i] {
+                    if let PlayerCommandState::GotCommand(_, _, _, _) = next_commands[i] {
                         players_that_have_commands += 1;
                         continue;
                     }
@@ -235,11 +235,12 @@ where
                     if extra_commands_queue.len() > 0 {
                         let command_id = self.next_command_id;
                         self.next_command_id += 1;
-                        next_commands[i] = PlayerCommandState::GotCommand(
-                            extra_commands_queue.pop_front().unwrap(),
-                            self.time,
-                            command_id,
-                        );
+                        let com = extra_commands_queue.pop_front().unwrap();
+                        let duration = self
+                            .battle_logic
+                            .get_command_duration(&self.player_states[i], &com);
+                        next_commands[i] =
+                            PlayerCommandState::GotCommand(com, self.time, duration, command_id);
                         players_that_have_commands += 1;
                         continue;
                     }
@@ -248,20 +249,22 @@ where
                         Ok(com) => {
                             let command_id = self.next_command_id;
                             self.next_command_id += 1;
-                            next_commands[i] =
-                                PlayerCommandState::GotCommand(com, self.time, command_id);
-                            // note: we call duration calculated here as "estimated"
-                            // cuz technically it may change due to player_state change by the time
-                            // it's time to pick next command to execute
                             let player_state = &self.player_states[i];
+                            let duration = self
+                                .battle_logic
+                                .get_command_duration(&self.player_states[i], &com);
+                            next_commands[i] = PlayerCommandState::GotCommand(
+                                com, self.time, duration, command_id,
+                            );
+
                             let est_duration =
                                 self.battle_logic.get_command_duration(player_state, &com);
                             // note - operation logged here MAY not complete, depending on concrete game logic
                             self.log_writer.add_log_data(
                                 player_state.log_repr(),
-                                format!("{}({}):start", com.to_log_repr(), command_id),
+                                format!("-{}({})", com.to_log_repr(), command_id),
                                 self.time,
-                                est_duration,
+                                duration,
                             );
                             players_that_have_commands += 1;
                             continue;
@@ -336,7 +339,7 @@ where
                     }
 
                     // if not done - select command to execute and advance time
-                    if let Some((remaining_duration, full_duration, player_i, next_command)) =
+                    if let Some((remaining_duration, player_i, next_command)) =
                         next_commands
                             .iter_mut()
                             .enumerate()
@@ -350,22 +353,16 @@ where
                             })
                             .map(|(player_i, k)| {
                                 // calc remaining duration and other useful things
-                                let (com, command_start_gametime) =
-                                    if let PlayerCommandState::GotCommand(x, y, _) = k {
-                                        (x, y)
+                                let (com, command_start_gametime, duration) =
+                                    if let PlayerCommandState::GotCommand(x, y, dur, _) = k {
+                                        (x, y, *dur)
                                     } else {
                                         // filter above must have filtered Finish out, and None must not happen cuz of prev logic
                                         unreachable!();
                                     };
-                                let player_state = &mut self.player_states[player_i];
-                                // duration may be based in stats or map modifiers
-                                let duration =
-                                    self.battle_logic.get_command_duration(&player_state, com);
-
                                 //
                                 (
                                     *command_start_gametime + duration - self.time,
-                                    duration,
                                     player_i,
                                     k,
                                 )
@@ -374,11 +371,13 @@ where
                     {
                         // process the next command
 
-                        let (com, _, command_id) = next_command.take().unwrap();
+                        let (com, _, _, command_id) = next_command.take().unwrap();
 
                         // ONLY Finished command may have None for reply channel by design
                         //  also we bravely unwrap cuz channels may close only in the start of the loop
                         let reply_channel = &channels[player_i].as_ref().unwrap().1;
+
+                        self.time += remaining_duration;
 
                         let (reply, extra_actions_maybe) = self.battle_logic.process_commands(
                             player_i,
@@ -403,16 +402,15 @@ where
                         }
 
                         start_timestamps[player_i] = Instant::now(); // update timeout counter
-                        self.time += remaining_duration;
 
                         // log operation finish
                         self.log_writer.add_log_data(
                             self.player_states[player_i].log_repr(),
                             format!(
-                                "{}({}):{}",
+                                "{}{}({})",
+                                if command_succeeded { "+" } else { "!" },
                                 com.to_log_repr(),
                                 command_id,
-                                if command_succeeded { "done" } else { "failed" }
                             ),
                             self.time,
                             0,

@@ -238,6 +238,7 @@ where
                         .objects_at_are_passable(fwd_pos_x, fwd_pos_y)
                 {
                     player_state.move_to((fwd_pos_x, fwd_pos_y));
+                    logger(player_state.log_repr(), format!("move[{},{}]", fwd_pos_x, fwd_pos_y));
 
                     // pick up pickable objects
 
@@ -271,12 +272,14 @@ where
                 self.recreate_objects_layer(player_states);
                 let player_state = &mut player_states[player_i];
                 player_state.turn_cw();
+                logger(player_state.log_repr(), format!("turn[{}]", player_state.orientation().log_repr()));
                 (PlayerCommandReply::Ok, None)
             }
             PlayerCommand::TurnCCW => {
                 self.recreate_objects_layer(player_states);
                 let player_state = &mut player_states[player_i];
                 player_state.turn_ccw();
+                logger(player_state.log_repr(), format!("turn[{}]", player_state.orientation().log_repr()));
                 (PlayerCommandReply::Ok, None)
             }
             PlayerCommand::Shoot => {
@@ -295,6 +298,10 @@ where
                         false,
                         true,
                     ) {
+                        {
+                            let (x, y) = player_state.position();
+                            logger(player_state.log_repr(), format!("shoot[{x},{y},{hit_x},{hit_y}]"));
+                        }
                         let mut objs_to_destroy = Vec::new();
                         for obj in self.object_layer.objects_at(hit_x, hit_y).into_iter() {
                             if !obj.shootable() {
@@ -311,6 +318,7 @@ where
                             }
                         }
                         for obj_id in objs_to_destroy {
+                            logger(self.object_layer.object_by_id(obj_id).unwrap().log_repr(), format!("break"));
                             self.object_layer.remove_object(obj_id);
                         }
                     };
