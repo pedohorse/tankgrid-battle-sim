@@ -276,6 +276,7 @@ where
                         next_commands[i] = PlayerCommandState::Finish;
                         players_that_have_commands += 1;
                     }
+                    thread::sleep(Duration::from_micros(1));
                 }
                 let players_that_have_commands = players_that_have_commands; // remove mut
 
