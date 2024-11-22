@@ -12,7 +12,7 @@ where
     fn remove_object(&mut self, uid: u64) -> bool;
     fn clear(&mut self);
     fn clear_by<F>(&mut self, f: F) where F: Fn(&MObj) -> bool;
-    fn add(&mut self, obj: MObj);
+    fn add(&mut self, obj: MObj) -> u64;
 
     /// all objects at point are passable
     fn objects_at_are_passable(&self, x: i64, y: i64) -> bool {

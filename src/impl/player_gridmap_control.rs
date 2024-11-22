@@ -111,6 +111,18 @@ impl PlayerControl for GridPlayerState
 }
 
 impl MapObject<GridOrientation> for GridPlayerState {
+    fn clone_with_uid(source: &Self, new_uid: u64) -> Self {
+        GridPlayerState {
+            row: source.row,
+            col: source.col,
+            orientation: source.orientation,
+            ammo: source.ammo,
+            health: source.health,
+            name: source.name.clone(),
+            unique_id: new_uid,
+        }
+    }
+
     fn unique_id(&self) -> u64 {
         self.unique_id
     }

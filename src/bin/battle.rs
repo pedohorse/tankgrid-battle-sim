@@ -1,4 +1,6 @@
-use battle_sim::object_layer::ObjectLayer;
+use battle_sim::map::MapReadAccess;
+use battle_sim::maptile_logic::MaptileLogic;
+use battle_sim::object_layer::{self, ObjectLayer};
 use battle_sim::r#impl::buf_battle_logger::BufferLogWriter;
 use battle_sim::r#impl::grid_battle::{GridBattle, GridPlayerState};
 use battle_sim::r#impl::grid_map::GridBattleMap;
@@ -6,11 +8,12 @@ use battle_sim::r#impl::grid_map_prober::GridMapProber;
 use battle_sim::r#impl::grid_orientation::GridOrientation;
 use battle_sim::r#impl::simple_battle_logic::PlayerCommand;
 use battle_sim::r#impl::simple_battle_logic::{CommandTimer, SimpleBattleLogic};
+use battle_sim::r#impl::simple_battle_object_layer::SimpleBattleObjectLayer;
+use battle_sim::r#impl::simple_object::{ObjectCacheType, SimpleObject};
 use battle_sim::r#impl::tile_types_logic::TileTypeLogic;
-use battle_sim::r#impl::trivial_object_layer::TrivialObjectLayer;
 use battle_sim::serialization::FromFile;
 
-use std::collections::HashMap;
+use rand::prelude::*;
 use std::env::args;
 use std::fs::File;
 use std::io::{self, stdout, Error, ErrorKind, Read, Result, Write};
@@ -63,6 +66,7 @@ fn main() -> ExitCode {
             return ExitCode::from(1);
         }
     };
+    let map_logic = TileTypeLogic::new();
 
     let logger = BufferLogWriter::new(io::BufWriter::new({
         if let Some(path) = config.log_path {
@@ -110,16 +114,43 @@ fn main() -> ExitCode {
         }
 
         player_initial_data.push((
-            GridPlayerState::new(x, y, ori, 20, 1, "player"),
+            GridPlayerState::new(x, y, ori, 5, 1, "player"),
             player_program,
         ));
     }
 
+    let mut object_layer = SimpleBattleObjectLayer::new();
+    {
+        let mut rng = StdRng::seed_from_u64(1234567);
+        let ammocrates_count = 1.max(map.map_data().row_count() * map.map_data().row(0).len() / 100);
+        for _ in 0..ammocrates_count {
+            for _ in 0..100 {
+                let y = rng.gen_range(0..map.map_data().row_count());
+                let x = rng.gen_range(0..map.map_data().row(y).len());
+                let x = x as i64;
+                let y = y as i64;
+                if !map_logic.passable(map.get_tile_at(x, y)) || object_layer.objects_at(x, y).len() > 0 {
+                    continue;
+                }
+                object_layer.add(SimpleObject::new(
+                    x,
+                    y,
+                    GridOrientation::North,
+                    ObjectCacheType::AmmoCrate(17),
+                    false,
+                    true,
+                    false,
+                ));
+                break;
+            }
+        }
+    }
+
     let game_logic = SimpleBattleLogic::new(
         map,
-        TileTypeLogic::new(),
+        map_logic,
         GridMapProber::new(),
-        TrivialObjectLayer::new(),
+        object_layer,
         CommandTimings {},
         1,
     );

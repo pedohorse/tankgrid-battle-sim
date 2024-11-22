@@ -11,6 +11,8 @@ use crate::orientation::SimpleOrientation;
 use crate::player_state::PlayerControl;
 use crate::script_repr::{FromScriptRepr, ToScriptRepr};
 
+use super::simple_object::{SimpleObject, ObjectCacheType};
+
 use std::collections::HashMap;
 use std::hash::Hash;
 use std::marker::PhantomData;
@@ -49,7 +51,7 @@ where
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub enum PlayerCommandReply {
     Failed,
     Ok,
@@ -67,81 +69,17 @@ impl CommandReplyStat for PlayerCommandReply {
     }
 }
 
-pub enum ObjectCacheType {
-    Player(usize),
-    AmmoCrate(usize),
-    //Stuff, // TODO: add stuff like pickable items
-}
-
-impl LogRepresentable for ObjectCacheType {
-    fn log_repr(&self) -> String {
-        match self {
-            ObjectCacheType::Player(_) => "player",
-            ObjectCacheType::AmmoCrate(_) => "ammocrate",
-        }
-        .to_owned()
-    }
-}
-
 pub trait CommandTimer<PC> {
     fn get_base_duration(&self, command: &PC) -> GameTime;
-}
-
-pub struct ObjectCacheRepr<R> {
-    uid: u64,
-    obj_type: ObjectCacheType,
-    pos: (i64, i64),
-    rot: R,
-    seethroughable: bool,
-    passable: bool,
-    shootable: bool,
-    script_repr: String,
-}
-
-impl<R> MapObject<R> for ObjectCacheRepr<R>
-where
-    R: Copy,
-{
-    fn unique_id(&self) -> u64 {
-        self.uid
-    }
-
-    fn orientation(&self) -> R {
-        self.rot
-    }
-
-    fn position(&self) -> (i64, i64) {
-        self.pos
-    }
-
-    fn passable(&self) -> bool {
-        self.passable
-    }
-
-    fn seethroughable(&self) -> bool {
-        self.seethroughable
-    }
-}
-
-impl<R> ToScriptRepr for ObjectCacheRepr<R> {
-    fn to_script_repr(&self) -> String {
-        self.script_repr.clone()
-    }
-}
-
-impl<R> LogRepresentable for ObjectCacheRepr<R> {
-    fn log_repr(&self) -> String {
-        format!("obj[{}]({})", self.obj_type.log_repr(), self.uid)
-    }
 }
 
 pub struct SimpleBattleLogic<T, M, L, Pr, R, OLayer, Fdur>
 where
     L: MaptileLogic<T>,
     M: MapReadAccess<T>,
-    Pr: MapProber<T, R, M, L, ObjectCacheRepr<R>, OLayer>,
+    Pr: MapProber<T, R, M, L, SimpleObject<R>, OLayer>,
     R: Copy,
-    OLayer: ObjectLayer<R, ObjectCacheRepr<R>>,
+    OLayer: ObjectLayer<R, SimpleObject<R>>,
     Fdur: CommandTimer<PlayerCommand<R>>,
 {
     map: M,
@@ -173,9 +111,9 @@ where
         + SimpleOrientation
         + FromScriptRepr
         + LogRepresentable,
-    OLayer: ObjectLayer<R, ObjectCacheRepr<R>>,
+    OLayer: ObjectLayer<R, SimpleObject<R>>,
     P: PlayerControl + MapObject<R> + ToScriptRepr + LogRepresentable,
-    Pr: MapProber<T, R, M, L, ObjectCacheRepr<R>, OLayer>,
+    Pr: MapProber<T, R, M, L, SimpleObject<R>, OLayer>,
     Fdur: CommandTimer<PlayerCommand<R>>,
 {
     fn is_player_dead(&self, player: &P) -> bool {
@@ -210,6 +148,16 @@ where
                 format!("spawn[{},{},{}]", x, y, ori.log_repr()),
             );
         }
+        // log initial objects and players
+        for object in self.object_layer.objects() {
+            if let ObjectCacheType::Player(_) = object.obj_type {
+                // for now log players and other objects separately
+                continue;
+            }
+            let (x, y) = object.pos;
+            let ori = object.orientation();
+            logger(object.log_repr(), format!("spawn[{},{},{}]", x, y, ori.log_repr()));
+        }
     }
 
     fn process_commands<LWF>(
@@ -224,7 +172,7 @@ where
     {
         match com {
             PlayerCommand::MoveFwd => {
-                self.recreate_objects_layer(player_states);
+                self.recache_players_to_object_layer(player_states);
                 let player_state = &mut player_states[player_i];
                 let mut extra_commands = None;
 
@@ -269,14 +217,14 @@ where
                 (reply, extra_commands)
             }
             PlayerCommand::TurnCW => {
-                self.recreate_objects_layer(player_states);
+                self.recache_players_to_object_layer(player_states);
                 let player_state = &mut player_states[player_i];
                 player_state.turn_cw();
                 logger(player_state.log_repr(), format!("turn[{}]", player_state.orientation().log_repr()));
                 (PlayerCommandReply::Ok, None)
             }
             PlayerCommand::TurnCCW => {
-                self.recreate_objects_layer(player_states);
+                self.recache_players_to_object_layer(player_states);
                 let player_state = &mut player_states[player_i];
                 player_state.turn_ccw();
                 logger(player_state.log_repr(), format!("turn[{}]", player_state.orientation().log_repr()));
@@ -286,7 +234,7 @@ where
                 let player_state = &mut player_states[player_i];
                 if player_state.resource_value(AMMO_RES) > 0 {
                     player_state.expend_resource(AMMO_RES, 1);
-                    self.recreate_objects_layer(player_states);
+                    self.recache_players_to_object_layer(player_states);
                     let player_state = &mut player_states[player_i];
                     if let Some((hit_x, hit_y)) = self.map_prober.raycast(
                         player_state.position(),
@@ -332,7 +280,7 @@ where
                 // note: look command's ori is relative to tank orientation
                 // so we need to convert it to global orientation
                 let ori = ori.from_relative_to_global(&player_states[player_i].orientation());
-                self.recreate_objects_layer(player_states);
+                self.recache_players_to_object_layer(player_states);
                 let look_result = self
                     .map_prober
                     .look(
@@ -477,7 +425,7 @@ where
                             .collect::<Vec<_>>(),
                     )
                 } else {
-                    PyResult::Err(vm.new_runtime_error("unexpected look reply".to_owned()))
+                    PyResult::Err(vm.new_runtime_error(format!("unexpected look reply: {:?}", ret)))
                 }
             }
         });
@@ -489,9 +437,9 @@ where
     T: Copy + Clone + Send + ToScriptRepr,
     L: MaptileLogic<T>,
     M: MapReadAccess<T>,
-    Pr: MapProber<T, R, M, L, ObjectCacheRepr<R>, OLayer>,
+    Pr: MapProber<T, R, M, L, SimpleObject<R>, OLayer>,
     R: Copy + Clone + Eq + Hash + Send + 'static + FromScriptRepr,
-    OLayer: ObjectLayer<R, ObjectCacheRepr<R>>,
+    OLayer: ObjectLayer<R, SimpleObject<R>>,
     Fdur: CommandTimer<PlayerCommand<R>>,
 {
     pub fn new(
@@ -514,7 +462,7 @@ where
         }
     }
 
-    fn recreate_objects_layer<P>(&mut self, player_states: &[P])
+    fn recache_players_to_object_layer<P>(&mut self, player_states: &[P])
     where
         // TODO: player does NOT have to impl MapObject
         P: PlayerControl + MapObject<R> + ToScriptRepr,
@@ -533,7 +481,7 @@ where
                 // if dead (TODO: may spawn a corpse object instead)
                 continue;
             }
-            self.object_layer.add(ObjectCacheRepr {
+            self.object_layer.add(SimpleObject {
                 uid: player.unique_id(),
                 obj_type: ObjectCacheType::Player(i),
                 pos: player.position(),

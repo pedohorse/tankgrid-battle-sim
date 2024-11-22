@@ -16,6 +16,7 @@ use super::log_data::{LogRepresentable, LogWriter};
 use super::player_state::PlayerControl;
 use super::script_repr::ToScriptRepr;
 
+use rustpython_vm::{vm, Settings};
 use rustpython_vm::{
     compiler,
     signal::{user_signal_channel, UserSignalReceiver},
@@ -25,7 +26,7 @@ use rustpython_vm::{
 #[derive(Clone, Copy, PartialEq)]
 pub enum PlayerCommandState<PC> {
     None,
-    GotCommand(PC, GameTime, GameTime, usize),
+    GotCommand(PC, bool, GameTime, GameTime, usize),
     Finish,
 }
 
@@ -34,9 +35,9 @@ impl<PC> PlayerCommandState<PC> {
         mem::replace(self, PlayerCommandState::None)
     }
 
-    pub fn unwrap(self) -> (PC, GameTime, GameTime, usize) {
-        if let PlayerCommandState::GotCommand(c, t, dur, c_id) = self {
-            (c, t, dur, c_id)
+    pub fn unwrap(self) -> (PC, bool, GameTime, GameTime, usize) {
+        if let PlayerCommandState::GotCommand(c, nr, t, dur, c_id) = self {
+            (c, nr, t, dur, c_id)
         } else {
             panic!("unwrap failed!");
         }
@@ -206,7 +207,7 @@ where
                     for next_command in next_commands.iter_mut() {
                         // just finalize all players
                         // this will force their stopping and loop safe exit
-                        if let PlayerCommandState::GotCommand(_, _, _, _) = next_command {
+                        if let PlayerCommandState::GotCommand(_, _, _, _, _) = next_command {
                             // we should let pending commands finalize
                         } else {
                             *next_command = PlayerCommandState::Finish;
@@ -226,7 +227,7 @@ where
                         players_that_have_commands += 1;
                         continue;
                     };
-                    if let PlayerCommandState::GotCommand(_, _, _, _) = next_commands[i] {
+                    if let PlayerCommandState::GotCommand(_, _, _, _, _) = next_commands[i] {
                         players_that_have_commands += 1;
                         continue;
                     }
@@ -240,7 +241,7 @@ where
                             .battle_logic
                             .get_command_duration(&self.player_states[i], &com);
                         next_commands[i] =
-                            PlayerCommandState::GotCommand(com, self.time, duration, command_id);
+                            PlayerCommandState::GotCommand(com, false, self.time, duration, command_id);
                         players_that_have_commands += 1;
                         continue;
                     }
@@ -254,7 +255,7 @@ where
                                 .battle_logic
                                 .get_command_duration(&self.player_states[i], &com);
                             next_commands[i] = PlayerCommandState::GotCommand(
-                                com, self.time, duration, command_id,
+                                com, true, self.time, duration, command_id,
                             );
 
                             let est_duration =
@@ -354,7 +355,7 @@ where
                             .map(|(player_i, k)| {
                                 // calc remaining duration and other useful things
                                 let (com, command_start_gametime, duration) =
-                                    if let PlayerCommandState::GotCommand(x, y, dur, _) = k {
+                                    if let PlayerCommandState::GotCommand(x, _, y, dur, _) = k {
                                         (x, y, *dur)
                                     } else {
                                         // filter above must have filtered Finish out, and None must not happen cuz of prev logic
@@ -371,7 +372,7 @@ where
                     {
                         // process the next command
 
-                        let (com, _, _, command_id) = next_command.take().unwrap();
+                        let (com, need_to_reply, _, _, command_id) = next_command.take().unwrap();
 
                         // ONLY Finished command may have None for reply channel by design
                         //  also we bravely unwrap cuz channels may close only in the start of the loop
@@ -394,11 +395,13 @@ where
                         let command_succeeded = reply.command_succeeded();
 
                         // send reply
-                        if let Err(_) = reply_channel.send(reply) {
-                            println!("failed to send reply to the player");
-                            // consider player broken
-                            *next_command = PlayerCommandState::Finish;
-                            continue;
+                        if need_to_reply {
+                            if let Err(_) = reply_channel.send(reply) {
+                                println!("failed to send reply to the player");
+                                // consider player broken
+                                *next_command = PlayerCommandState::Finish;
+                                continue;
+                            }
                         }
 
                         start_timestamps[player_i] = Instant::now(); // update timeout counter
@@ -492,7 +495,9 @@ where
         let reply_channel = Rc::new(RefCell::new(reply_channel));
         let command_channel = Rc::new(RefCell::new(command_channel));
 
-        let interpreter = Interpreter::with_init(Default::default(), |vm| {
+        let mut vm_settings: Settings = Default::default();
+        vm_settings.install_signal_handlers = false;
+        let interpreter = Interpreter::with_init(vm_settings, |vm| {
             vm.set_user_signal_channel(vm_signal_receiver);
         });
         let ret = interpreter.enter(|vm| {

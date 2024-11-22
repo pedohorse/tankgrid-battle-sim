@@ -6,9 +6,10 @@ use battle_sim::r#impl::grid_map_prober::GridMapProber;
 use battle_sim::r#impl::grid_orientation::GridOrientation;
 use battle_sim::gametime::GameTime;
 use battle_sim::r#impl::simple_battle_logic::{
-    ObjectCacheRepr, PlayerCommand, SimpleBattleLogic,
+    PlayerCommand, SimpleBattleLogic,
 };
-use battle_sim::r#impl::trivial_object_layer::TrivialObjectLayer;
+use battle_sim::r#impl::simple_object::SimpleObject;
+use battle_sim::r#impl::simple_battle_object_layer::SimpleBattleObjectLayer;
 
 use std::collections::HashMap;
 
@@ -25,7 +26,7 @@ where
                 TestSimpleLogic,
                 GridMapProber,
                 GridOrientation,
-                TrivialObjectLayer<ObjectCacheRepr<GridOrientation>>,
+                SimpleBattleObjectLayer<SimpleObject<GridOrientation>>,
                 HashmapCommandTimer<PlayerCommand<GridOrientation>>,
             >,
             VecLogWriter<String, String>,
@@ -45,7 +46,7 @@ where
             map,
             TestSimpleLogic {},
             GridMapProber {},
-            TrivialObjectLayer::new(),
+            SimpleBattleObjectLayer::new(),
             HashmapCommandTimer::new(HashMap::from([
                 (PlayerCommand::TurnCW, 10),
                 (PlayerCommand::MoveFwd, 20),

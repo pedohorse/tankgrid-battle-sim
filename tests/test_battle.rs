@@ -8,7 +8,7 @@ use battle_sim::r#impl::grid_map::GridBattleMap;
 use battle_sim::r#impl::grid_map_prober::GridMapProber;
 use battle_sim::r#impl::grid_orientation::GridOrientation;
 use battle_sim::r#impl::simple_battle_logic::{PlayerCommand, SimpleBattleLogic};
-use battle_sim::r#impl::trivial_object_layer::TrivialObjectLayer;
+use battle_sim::r#impl::simple_battle_object_layer::SimpleBattleObjectLayer;
 use std::collections::HashMap;
 
 mod common;
@@ -23,7 +23,7 @@ where
     fn new() -> Self {
         TestNoObjectCache {}
     }
-    fn add(&mut self, obj: MObj) {}
+    fn add(&mut self, obj: MObj) -> u64 {0}
     fn clear(&mut self) {}
     fn objects(&self) -> &[MObj] {
         &[]
@@ -53,7 +53,7 @@ fn testtest() {
             map,
             TestTrivialLogic {},
             GridMapProber {},
-            TrivialObjectLayer::new(),
+            SimpleBattleObjectLayer::new(),
             HashmapCommandTimer::new(HashMap::new(), 10),
             0,
         ),
@@ -84,7 +84,7 @@ fn test2players() {
             map,
             TestTrivialLogic {},
             GridMapProber {},
-            TrivialObjectLayer::new(),
+            SimpleBattleObjectLayer::new(),
             HashmapCommandTimer::new(HashMap::from([
                 (PlayerCommand::MoveFwd, 100),
                 (PlayerCommand::TurnCW, 10),
@@ -139,7 +139,7 @@ fn test_2players_move_into_each_other() {
             map,
             TestTrivialLogic {},
             GridMapProber {},
-            TrivialObjectLayer::new(),
+            SimpleBattleObjectLayer::new(),
             HashmapCommandTimer::new(HashMap::from([
                 (PlayerCommand::MoveFwd, 100),
                 (PlayerCommand::TurnCW, 10),
@@ -195,7 +195,7 @@ fn test_2players_move_past_each_other() {
             map,
             TestTrivialLogic {},
             GridMapProber {},
-            TrivialObjectLayer::new(),
+            SimpleBattleObjectLayer::new(),
             HashmapCommandTimer::new(HashMap::from([
                 (PlayerCommand::MoveFwd, 100),
                 (PlayerCommand::TurnCW, 10),
@@ -251,7 +251,7 @@ fn test_2players_move_into_each_other_but_shoot() {
             map,
             TestTrivialLogic {},
             GridMapProber {},
-            TrivialObjectLayer::new(),
+            SimpleBattleObjectLayer::new(),
             HashmapCommandTimer::new(HashMap::from([
                 (PlayerCommand::MoveFwd, 100),
                 (PlayerCommand::TurnCW, 10),
@@ -317,7 +317,7 @@ fn test2players_inf_loop() {
             map,
             TestTrivialLogic {},
             GridMapProber {},
-            TrivialObjectLayer::new(),
+            SimpleBattleObjectLayer::new(),
             HashmapCommandTimer::new(HashMap::from([
                 (PlayerCommand::MoveFwd, 100),
                 (PlayerCommand::TurnCW, 10),
@@ -364,7 +364,7 @@ fn test2players_bad_inf_loop() {
             map,
             TestTrivialLogic {},
             GridMapProber {},
-            TrivialObjectLayer::new(),
+            SimpleBattleObjectLayer::new(),
             HashmapCommandTimer::new(HashMap::from([
                 (PlayerCommand::MoveFwd, 100),
                 (PlayerCommand::TurnCW, 10),
