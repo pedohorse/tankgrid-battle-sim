@@ -122,14 +122,17 @@ fn main() -> ExitCode {
     let mut object_layer = SimpleBattleObjectLayer::new();
     {
         let mut rng = StdRng::seed_from_u64(1234567);
-        let ammocrates_count = 1.max(map.map_data().row_count() * map.map_data().row(0).len() / 100);
+        let ammocrates_count =
+            1.max(map.map_data().row_count() * map.map_data().row(0).len() / 100);
         for _ in 0..ammocrates_count {
             for _ in 0..100 {
                 let y = rng.gen_range(0..map.map_data().row_count());
                 let x = rng.gen_range(0..map.map_data().row(y).len());
                 let x = x as i64;
                 let y = y as i64;
-                if !map_logic.passable(map.get_tile_at(x, y)) || object_layer.objects_at(x, y).len() > 0 {
+                if !map_logic.passable(map.get_tile_at(x, y))
+                    || object_layer.objects_at(x, y).len() > 0
+                {
                     continue;
                 }
                 object_layer.add(SimpleObject::new(
@@ -155,7 +158,20 @@ fn main() -> ExitCode {
         1,
     );
     let mut battle = GridBattle::new(game_logic, player_initial_data, logger);
-    battle.run_simulation();
+    let winners = battle.run_simulation();
+
+    if let Some(winner_ids) = winners {
+        println!(
+            "WINNERS:{}",
+            winner_ids
+                .iter()
+                .map(|&x| { x.to_string() })
+                .collect::<Vec<String>>()
+                .join(",")
+        );
+    } else {
+        println!("DRAW");
+    }
 
     ExitCode::SUCCESS
 }
