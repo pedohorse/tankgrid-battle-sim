@@ -11,7 +11,7 @@ use crate::orientation::SimpleOrientation;
 use crate::player_state::PlayerControl;
 use crate::script_repr::{FromScriptRepr, ToScriptRepr};
 
-use super::simple_object::{SimpleObject, ObjectCacheType};
+use super::simple_object::{ObjectCacheType, SimpleObject};
 
 use std::collections::HashMap;
 use std::hash::Hash;
@@ -28,9 +28,12 @@ pub enum PlayerCommand<R> {
     TurnCCW,
     Shoot,
     Wait,
+    CheckAmmo,
+    CheckHealth,
+    CheckHit, // checks from which side was last hit
     Look(R),
-    AddAmmo(usize),   // generated after picking up ammo crate
-    AddHealth(usize), // generated after picking up health
+    AddAmmo(u64),   // generated after picking up ammo crate
+    AddHealth(u64), // generated after picking up health
 }
 
 impl<R> LogRepresentable for PlayerCommand<R>
@@ -47,19 +50,24 @@ where
             PlayerCommand::Look(dir) => format!("look[{}]", dir.log_repr()),
             PlayerCommand::AddAmmo(ammo) => format!("add-ammo[{}]", ammo),
             PlayerCommand::AddHealth(health) => format!("heal[{}]", health),
+            PlayerCommand::CheckAmmo => format!("check-ammo"),
+            PlayerCommand::CheckHealth => format!("check-health"),
+            PlayerCommand::CheckHit => format!("check-hit"),
         }
     }
 }
 
 #[derive(Clone, Debug)]
-pub enum PlayerCommandReply {
+pub enum PlayerCommandReply<R> {
     Failed,
     Ok,
     Bool(bool),
+    Int(i64),
+    HitDirection(Option<R>),
     LookResult(Vec<(String, Option<String>)>),
 }
 
-impl CommandReplyStat for PlayerCommandReply {
+impl<R> CommandReplyStat for PlayerCommandReply<R> {
     fn command_succeeded(&self) -> bool {
         if let PlayerCommandReply::Failed = self {
             false
@@ -94,9 +102,10 @@ where
 
 const HEALTH_RES: usize = 0;
 const AMMO_RES: usize = 1;
+const HIT_DIR_RES: usize = 2;
 
 impl<T, M, L, R, P, Pr, OLayer, Fdur>
-    BattleLogic<P, PlayerCommand<R>, PlayerCommandReply, String, String>
+    BattleLogic<P, PlayerCommand<R>, PlayerCommandReply<R>, String, String>
     for SimpleBattleLogic<T, M, L, Pr, R, OLayer, Fdur>
 where
     T: Copy + Clone + Send + ToScriptRepr,
@@ -110,7 +119,11 @@ where
         + 'static
         + SimpleOrientation
         + FromScriptRepr
-        + LogRepresentable,
+        + ToScriptRepr
+        + LogRepresentable
+        + Into<u64>
+        + From<u64>
+        + std::fmt::Debug,
     OLayer: ObjectLayer<R, SimpleObject<R>>,
     P: PlayerControl + MapObject<R> + ToScriptRepr + LogRepresentable,
     Pr: MapProber<T, R, M, L, SimpleObject<R>, OLayer>,
@@ -156,7 +169,10 @@ where
             }
             let (x, y) = object.pos;
             let ori = object.orientation();
-            logger(object.log_repr(), format!("spawn[{},{},{}]", x, y, ori.log_repr()));
+            logger(
+                object.log_repr(),
+                format!("spawn[{},{},{}]", x, y, ori.log_repr()),
+            );
         }
     }
 
@@ -166,7 +182,7 @@ where
         com: PlayerCommand<R>,
         player_states: &mut [P],
         logger: &mut LWF,
-    ) -> (PlayerCommandReply, Option<Vec<PlayerCommand<R>>>)
+    ) -> (PlayerCommandReply<R>, Option<Vec<PlayerCommand<R>>>)
     where
         LWF: FnMut(String, String),
     {
@@ -186,7 +202,10 @@ where
                         .objects_at_are_passable(fwd_pos_x, fwd_pos_y)
                 {
                     player_state.move_to((fwd_pos_x, fwd_pos_y));
-                    logger(player_state.log_repr(), format!("move[{},{}]", fwd_pos_x, fwd_pos_y));
+                    logger(
+                        player_state.log_repr(),
+                        format!("move[{},{}]", fwd_pos_x, fwd_pos_y),
+                    );
 
                     // pick up pickable objects
 
@@ -220,14 +239,20 @@ where
                 self.recache_players_to_object_layer(player_states);
                 let player_state = &mut player_states[player_i];
                 player_state.turn_cw();
-                logger(player_state.log_repr(), format!("turn[{}]", player_state.orientation().log_repr()));
+                logger(
+                    player_state.log_repr(),
+                    format!("turn[{}]", player_state.orientation().log_repr()),
+                );
                 (PlayerCommandReply::Ok, None)
             }
             PlayerCommand::TurnCCW => {
                 self.recache_players_to_object_layer(player_states);
                 let player_state = &mut player_states[player_i];
                 player_state.turn_ccw();
-                logger(player_state.log_repr(), format!("turn[{}]", player_state.orientation().log_repr()));
+                logger(
+                    player_state.log_repr(),
+                    format!("turn[{}]", player_state.orientation().log_repr()),
+                );
                 (PlayerCommandReply::Ok, None)
             }
             PlayerCommand::Shoot => {
@@ -248,9 +273,13 @@ where
                     ) {
                         {
                             let (x, y) = player_state.position();
-                            logger(player_state.log_repr(), format!("shoot[{x},{y},{hit_x},{hit_y}]"));
+                            logger(
+                                player_state.log_repr(),
+                                format!("shoot[{x},{y},{hit_x},{hit_y}]"),
+                            );
                         }
                         let mut objs_to_destroy = Vec::new();
+                        let player_ori = player_state.orientation();
                         for obj in self.object_layer.objects_at(hit_x, hit_y).into_iter() {
                             if !obj.shootable() {
                                 continue;
@@ -259,6 +288,14 @@ where
                                 ObjectCacheType::Player(other_player_i) => {
                                     let hit_enemy = &mut player_states[other_player_i];
                                     hit_enemy.expend_resource(HEALTH_RES, 1);
+                                    let hit_relative_direction = player_ori
+                                        .opposite()
+                                        .global_to_relative_to(&hit_enemy.orientation());
+                                    hit_enemy // 0 means no hit, we offset orient representation with 1 to not have overlap with 0
+                                        .set_resource(
+                                            HIT_DIR_RES,
+                                            1 + hit_relative_direction.into(),
+                                        );
                                 }
                                 ObjectCacheType::AmmoCrate(_) => {
                                     objs_to_destroy.push(obj.unique_id());
@@ -266,7 +303,10 @@ where
                             }
                         }
                         for obj_id in objs_to_destroy {
-                            logger(self.object_layer.object_by_id(obj_id).unwrap().log_repr(), format!("break"));
+                            logger(
+                                self.object_layer.object_by_id(obj_id).unwrap().log_repr(),
+                                format!("break"),
+                            );
                             self.object_layer.remove_object(obj_id);
                         }
                     };
@@ -320,6 +360,27 @@ where
                 player_state.gain_resource(HEALTH_RES, health);
                 (PlayerCommandReply::Ok, None)
             }
+            PlayerCommand::CheckAmmo => {
+                let player_state = &player_states[player_i];
+                let val = player_state.resource_value(AMMO_RES);
+                (PlayerCommandReply::Int(val as i64), None)
+            }
+            PlayerCommand::CheckHealth => {
+                let player_state = &player_states[player_i];
+                let val = player_state.resource_value(HEALTH_RES);
+                (PlayerCommandReply::Int(val as i64), None)
+            }
+            PlayerCommand::CheckHit => {
+                let player_state = &mut player_states[player_i];
+                let repr_res_value = player_state.resource_value(HIT_DIR_RES);
+                let hit_direction = if repr_res_value == 0 {
+                    None
+                } else {
+                    Some(R::from(repr_res_value - 1))
+                };
+                player_state.set_resource(HIT_DIR_RES, 0); // once read - last hit is set back to None
+                (PlayerCommandReply::HitDirection(hit_direction), None)
+            }
         }
     }
 
@@ -349,7 +410,7 @@ where
 
     fn initialize_scope<FSR>(vm: &VirtualMachine, scope: &Scope, comm_chan: FSR)
     where
-        FSR: Fn(PlayerCommand<R>) -> Result<PlayerCommandReply, ()> + Clone + 'static,
+        FSR: Fn(PlayerCommand<R>) -> Result<PlayerCommandReply<R>, ()> + Clone + 'static,
     {
         macro_rules! add_function {
             ($fname:expr, $fn:block) => {
@@ -426,6 +487,60 @@ where
                     )
                 } else {
                     PyResult::Err(vm.new_runtime_error(format!("unexpected look reply: {:?}", ret)))
+                }
+            }
+        });
+        add_function!("check_ammo", {
+            let comm_chan = comm_chan.clone();
+            move |vm: &VirtualMachine| {
+                println!("TEST: check_ammo");
+                let ret = if let Ok(x) = comm_chan(PlayerCommand::CheckAmmo) {
+                    x
+                } else {
+                    return PyResult::Err(vm.new_runtime_error("game closed".to_owned()));
+                };
+                if let PlayerCommandReply::Int(val) = ret {
+                    PyResult::Ok(val)
+                } else {
+                    PyResult::Err(
+                        vm.new_runtime_error(format!("unexpected check result: {:?}", ret)),
+                    )
+                }
+            }
+        });
+        add_function!("check_health", {
+            let comm_chan = comm_chan.clone();
+            move |vm: &VirtualMachine| {
+                println!("TEST: check_health");
+                let ret = if let Ok(x) = comm_chan(PlayerCommand::CheckHealth) {
+                    x
+                } else {
+                    return PyResult::Err(vm.new_runtime_error("game closed".to_owned()));
+                };
+                if let PlayerCommandReply::Int(val) = ret {
+                    PyResult::Ok(val)
+                } else {
+                    PyResult::Err(
+                        vm.new_runtime_error(format!("unexpected check result: {:?}", ret)),
+                    )
+                }
+            }
+        });
+        add_function!("check_hit", {
+            let comm_chan = comm_chan.clone();
+            move |vm: &VirtualMachine| {
+                println!("TEST: check_hit");
+                let ret = if let Ok(x) = comm_chan(PlayerCommand::CheckHit) {
+                    x
+                } else {
+                    return PyResult::Err(vm.new_runtime_error("game closed".to_owned()));
+                };
+                if let PlayerCommandReply::HitDirection(ori) = ret {
+                    PyResult::Ok(ori.map(|x| x.to_script_repr()))
+                } else {
+                    PyResult::Err(
+                        vm.new_runtime_error(format!("unexpected check result: {:?}", ret)),
+                    )
                 }
             }
         });

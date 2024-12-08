@@ -1,6 +1,6 @@
 use crate::log_data::LogRepresentable;
 use crate::orientation::SimpleOrientation;
-use crate::script_repr::FromScriptRepr;
+use crate::script_repr::{FromScriptRepr, ToScriptRepr};
 
 //Copy + Clone + Eq + Hash + Send + 'static + From<String>
 #[derive(PartialEq, Eq, Debug, Clone, Copy, Hash)]
@@ -23,6 +23,18 @@ impl FromScriptRepr for GridOrientation {
     }
 }
 
+impl ToScriptRepr for GridOrientation {
+    fn to_script_repr(&self) -> String {
+        match self {
+            GridOrientation::North => "forward",  // TODO: note, we have here "local" representation
+            GridOrientation::East => "right",  // TODO: but for log repr - "global" representation hardcoded
+            GridOrientation::South => "back",
+            GridOrientation::West => "left",
+        }
+        .to_owned()
+    }
+}
+
 impl LogRepresentable for GridOrientation {
     fn log_repr(&self) -> String {
         match self {
@@ -32,6 +44,29 @@ impl LogRepresentable for GridOrientation {
             GridOrientation::West => "west",
         }
         .to_owned()
+    }
+}
+
+impl From<u64> for GridOrientation {
+    fn from(value: u64) -> Self {
+        match value {
+            0 => GridOrientation::North,
+            1 => GridOrientation::East,
+            2 => GridOrientation::South,
+            3 => GridOrientation::West,
+            _ => panic!("bad value for converting into GridOrientation: {}", value),
+        }
+    }
+}
+
+impl Into<u64> for GridOrientation {
+    fn into(self) -> u64 {
+        match self {
+            GridOrientation::North => 0,
+            GridOrientation::East => 1,
+            GridOrientation::South => 2,
+            GridOrientation::West => 3,
+        }
     }
 }
 
@@ -135,6 +170,14 @@ impl SimpleOrientation for GridOrientation {
             GridOrientation::West => GridOrientation::South,
         }
     }
+    fn opposite(&self) -> Self {
+        match self {
+            GridOrientation::North => GridOrientation::South,
+            GridOrientation::East => GridOrientation::West,
+            GridOrientation::South => GridOrientation::North,
+            GridOrientation::West => GridOrientation::East,
+        }
+    }
 
     /// we consider North to be local "forward"
     fn from_relative_to_global(&self, relative_to: &Self) -> Self {
@@ -143,6 +186,14 @@ impl SimpleOrientation for GridOrientation {
             GridOrientation::East => self.turn_cw(),
             GridOrientation::South => self.turn_cw().turn_cw(),
             GridOrientation::West => self.turn_ccw(),
+        }
+    }
+    fn global_to_relative_to(&self, relative_to: &Self) -> Self {
+        match relative_to {
+            GridOrientation::North => *self,
+            GridOrientation::East => self.turn_ccw(),
+            GridOrientation::South => self.turn_ccw().turn_ccw(),
+            GridOrientation::West => self.turn_cw(),
         }
     }
 }

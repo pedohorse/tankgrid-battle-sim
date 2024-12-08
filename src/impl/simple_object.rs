@@ -9,7 +9,7 @@ use super::unique_id_counter::NEXT_OBJID;
 #[derive(Clone, Copy)]
 pub enum ObjectCacheType {
     Player(usize),
-    AmmoCrate(usize),
+    AmmoCrate(u64),
     //Stuff, // TODO: add stuff like pickable items
 }
 

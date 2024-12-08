@@ -6,5 +6,7 @@ pub trait SimpleOrientation {
     
     fn turn_cw(&self) -> Self;
     fn turn_ccw(&self) -> Self;
+    fn opposite(&self) -> Self;
     fn from_relative_to_global(&self, relative_to: &Self) -> Self;
+    fn global_to_relative_to(&self, relative_to: &Self) -> Self;
 }

@@ -14,8 +14,9 @@ pub struct GridPlayerState {
     pub row: i64,
     pub col: i64,
     pub orientation: GridOrientation,
-    pub ammo: usize,
-    pub health: usize,
+    pub ammo: u64,  // TODO: these should net be so specific, no point
+    pub health: u64,  // TODO: and below res ids are hardcoded to these values
+    last_hit_repr: u64,
     pub name: String,
     unique_id: u64,
 }
@@ -25,8 +26,8 @@ impl GridPlayerState {
         col: i64,
         row: i64,
         orientation: GridOrientation,
-        ammo: usize,
-        health: usize,
+        ammo: u64,
+        health: u64,
         name: &str,
     ) -> GridPlayerState {
         GridPlayerState {
@@ -35,6 +36,7 @@ impl GridPlayerState {
             orientation,
             ammo,
             health,
+            last_hit_repr: 0,
             name: name.to_owned(),
             unique_id: NEXT_OBJID.fetch_add(1, Ordering::Relaxed),
         }
@@ -82,7 +84,7 @@ impl PlayerControl for GridPlayerState
         }
     }
 
-    fn expend_resource(&mut self, res_id: usize, amount: usize) {
+    fn expend_resource(&mut self, res_id: usize, amount: u64) {
         let res = match res_id {
             0 => &mut self.health,
             1 => &mut self.ammo,
@@ -92,7 +94,7 @@ impl PlayerControl for GridPlayerState
         *res = if amount >= *res { 0 } else { *res - amount };
     }
 
-    fn gain_resource(&mut self, res_id: usize, amount: usize) {
+    fn gain_resource(&mut self, res_id: usize, amount: u64) {
         let res = match res_id {
             0 => &mut self.health,
             1 => &mut self.ammo,
@@ -101,12 +103,23 @@ impl PlayerControl for GridPlayerState
         *res += amount;
     }
 
-    fn resource_value(&self, res_id: usize) -> usize {
+    fn resource_value(&self, res_id: usize) -> u64 {
         match res_id {
             0 => self.health,
             1 => self.ammo,
+            2 => self.last_hit_repr,
             _ => 0,
         }
+    }
+
+    fn set_resource(&mut self, res_id: usize, amount: u64) {
+        let res = match res_id {
+            0 => &mut self.health,
+            1 => &mut self.ammo,
+            2 => &mut self.last_hit_repr,
+            _ => return,
+        };
+        *res = amount;
     }
 }
 
@@ -118,6 +131,7 @@ impl MapObject<GridOrientation> for GridPlayerState {
             orientation: source.orientation,
             ammo: source.ammo,
             health: source.health,
+            last_hit_repr: source.last_hit_repr,
             name: source.name.clone(),
             unique_id: new_uid,
         }

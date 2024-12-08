@@ -49,11 +49,17 @@ where
             SimpleBattleObjectLayer::new(),
             HashmapCommandTimer::new(HashMap::from([
                 (PlayerCommand::TurnCW, 10),
+                (PlayerCommand::TurnCCW, 10),
                 (PlayerCommand::MoveFwd, 20),
                 (PlayerCommand::Look(GridOrientation::North), 5),
                 (PlayerCommand::Look(GridOrientation::East), 5),
                 (PlayerCommand::Look(GridOrientation::South), 5),
                 (PlayerCommand::Look(GridOrientation::West), 5),
+                (PlayerCommand::Shoot, 10),
+                (PlayerCommand::Wait, 5),
+                (PlayerCommand::CheckAmmo, 2),
+                (PlayerCommand::CheckHealth, 2),
+                (PlayerCommand::CheckHit, 2),
             ]), 10),
             0,
         ),
@@ -140,6 +146,83 @@ if looked == [('empty_tile', None), ('wall', None)]:\n
             assert_eq!(50, b.time());
             assert_eq!(6, b.player_state(1).col);
             assert_eq!(2, b.player_state(1).row);
+        },
+    );
+}
+
+
+#[test]
+fn test_check_hit_dir() {
+    test_base(
+        vec![
+            (
+                GridPlayerState::new(20, 7, GridOrientation::South, 2, 10, "player1"),
+                "\
+start_hit = check_hit()\n
+wait()\n
+wait()\n
+mid_hit = check_hit()\n
+turn_cw()\n
+wait()\n
+end_hit = check_hit()\n
+same_end_hit = check_hit()\n
+print(start_hit, mid_hit, end_hit, same_end_hit)\n
+if start_hit is None and mid_hit == 'left' and end_hit == 'back' and same_end_hit is None:\n
+    move_forward()\n
+            "
+                .to_owned(),
+            ),
+            (
+                GridPlayerState::new(30, 7, GridOrientation::West, 2, 10, "player2"),
+                "\
+shoot()\n
+wait()\n
+shoot()\n
+            "
+                .to_owned(),
+            ),
+        ],
+        |b| {
+            assert_eq!(19, b.player_state(0).col); // it starts looking south, then turns cw
+            assert_eq!(7, b.player_state(0).row);
+        },
+    );
+}
+
+
+#[test]
+fn test_check_health_ammo() {
+    test_base(
+        vec![
+            (
+                GridPlayerState::new(20, 7, GridOrientation::South, 2, 10, "player1"),
+                "\
+start_health = check_health()\n
+wait()\n
+wait()\n
+end_health = check_health()\n
+if start_health == 10 and end_health == 9:\n
+    move_forward()\n
+            "
+                .to_owned(),
+            ),
+            (
+                GridPlayerState::new(30, 7, GridOrientation::West, 2, 10, "player2"),
+                "\
+start_ammo = check_ammo()\n
+shoot()\n
+end_ammo = check_ammo()\n
+if start_ammo == 2 and end_ammo == 1:\n
+    move_forward()\n
+            "
+                .to_owned(),
+            ),
+        ],
+        |b| {
+            assert_eq!(20, b.player_state(0).col);
+            assert_eq!(8, b.player_state(0).row);
+            assert_eq!(29, b.player_state(1).col);
+            assert_eq!(7, b.player_state(1).row);
         },
     );
 }
