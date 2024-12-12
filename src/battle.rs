@@ -242,6 +242,13 @@ where
                             .get_command_duration(&self.player_states[i], &com);
                         next_commands[i] =
                             PlayerCommandState::GotCommand(com, false, self.time, duration, command_id);
+                        // note, this log is same as below. TODO: can merge?
+                        self.log_writer.add_log_data(
+                            self.player_states[i].log_repr(),
+                            format!("-{}({})", com.to_log_repr(), command_id),
+                            self.time,
+                            duration,
+                        );
                         players_that_have_commands += 1;
                         continue;
                     }
@@ -258,8 +265,6 @@ where
                                 com, true, self.time, duration, command_id,
                             );
 
-                            let est_duration =
-                                self.battle_logic.get_command_duration(player_state, &com);
                             // note - operation logged here MAY not complete, depending on concrete game logic
                             self.log_writer.add_log_data(
                                 player_state.log_repr(),
