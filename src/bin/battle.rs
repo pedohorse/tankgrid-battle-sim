@@ -116,8 +116,9 @@ fn main() -> ExitCode {
             return ExitCode::from(1);
         }
 
+        let name: &str = player_program_file.file_stem().map(|x| x.to_str().unwrap_or("player")).unwrap_or("player");
         player_initial_data.push((
-            GridPlayerState::new(x, y, ori, 5, 5, "player"),
+            GridPlayerState::new(x, y, ori, 5, 5, name),
             player_program,
         ));
     }
