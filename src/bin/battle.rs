@@ -117,7 +117,7 @@ fn main() -> ExitCode {
         }
 
         player_initial_data.push((
-            GridPlayerState::new(x, y, ori, 5, 1, "player"),
+            GridPlayerState::new(x, y, ori, 5, 5, "player"),
             player_program,
         ));
     }
