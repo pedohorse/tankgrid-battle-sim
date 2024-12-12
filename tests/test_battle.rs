@@ -297,7 +297,7 @@ fn test_2players_move_into_each_other_but_shoot() {
         b.player_state(1).col,
         b.player_state(1).row
     );
-    assert_eq!(45, b.time());
+    assert_eq!(45 + 30, b.time());  // 30 - is 3 waits for default 10 each
     assert_eq!(GridOrientation::East, b.player_state(0).orientation);
     assert_eq!(GridOrientation::West, b.player_state(1).orientation);
     assert_eq!(0, b.player_state(0).col);

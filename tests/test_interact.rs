@@ -4,17 +4,14 @@ use battle_sim::r#impl::grid_battle::{GridBattle, GridPlayerState};
 use battle_sim::r#impl::grid_map::GridBattleMap;
 use battle_sim::r#impl::grid_map_prober::GridMapProber;
 use battle_sim::r#impl::grid_orientation::GridOrientation;
-use battle_sim::gametime::GameTime;
-use battle_sim::r#impl::simple_battle_logic::{
-    PlayerCommand, SimpleBattleLogic,
-};
-use battle_sim::r#impl::simple_object::SimpleObject;
+use battle_sim::r#impl::simple_battle_logic::{PlayerCommand, SimpleBattleLogic};
 use battle_sim::r#impl::simple_battle_object_layer::SimpleBattleObjectLayer;
+use battle_sim::r#impl::simple_object::SimpleObject;
 
 use std::collections::HashMap;
 
 mod common;
-use common::{SimpleTileType, TestSimpleLogic, VecLogWriter, HashmapCommandTimer};
+use common::{HashmapCommandTimer, SimpleTileType, TestSimpleLogic, VecLogWriter};
 
 fn test_base<F>(player_programs: Vec<(GridPlayerState, String)>, checks: F)
 where
@@ -47,20 +44,23 @@ where
             TestSimpleLogic {},
             GridMapProber {},
             SimpleBattleObjectLayer::new(),
-            HashmapCommandTimer::new(HashMap::from([
-                (PlayerCommand::TurnCW, 10),
-                (PlayerCommand::TurnCCW, 10),
-                (PlayerCommand::MoveFwd, 20),
-                (PlayerCommand::Look(GridOrientation::North), 5),
-                (PlayerCommand::Look(GridOrientation::East), 5),
-                (PlayerCommand::Look(GridOrientation::South), 5),
-                (PlayerCommand::Look(GridOrientation::West), 5),
-                (PlayerCommand::Shoot, 10),
-                (PlayerCommand::Wait, 5),
-                (PlayerCommand::CheckAmmo, 2),
-                (PlayerCommand::CheckHealth, 2),
-                (PlayerCommand::CheckHit, 2),
-            ]), 10),
+            HashmapCommandTimer::new(
+                HashMap::from([
+                    (PlayerCommand::TurnCW, 10),
+                    (PlayerCommand::TurnCCW, 10),
+                    (PlayerCommand::MoveFwd, 20),
+                    (PlayerCommand::Look(GridOrientation::North), 5),
+                    (PlayerCommand::Look(GridOrientation::East), 5),
+                    (PlayerCommand::Look(GridOrientation::South), 5),
+                    (PlayerCommand::Look(GridOrientation::West), 5),
+                    (PlayerCommand::Shoot, 10), // don't forget that successful shoot adds 3 waits
+                    (PlayerCommand::Wait, 5),
+                    (PlayerCommand::CheckAmmo, 2),
+                    (PlayerCommand::CheckHealth, 2),
+                    (PlayerCommand::CheckHit, 2),
+                ]),
+                10,
+            ),
             0,
         ),
         player_programs,
@@ -111,7 +111,7 @@ if looked[-1][1].startswith('player'):\n
 }
 
 #[test]
-fn test_look_on_map() {
+fn test_look_on_map_right() {
     test_base(
         vec![
             (
@@ -135,7 +135,7 @@ if looked == [('empty_tile', None), ('wall', None)]:\n
     move_forward()\n
     looked = look('right')\n
     print(looked)\n
-    if looked == [('empty_tile', None)]*4 + [('empty_tile', 'player[player1](side)')]:\n
+    if looked == [('empty_tile', None)]*4 + [('empty_tile', 'player[player1][left-side]')]:\n
         move_forward()\n
 \
             "
@@ -150,6 +150,45 @@ if looked == [('empty_tile', None), ('wall', None)]:\n
     );
 }
 
+#[test]
+fn test_look_on_map_left() {
+    test_base(
+        vec![
+            (
+                GridPlayerState::new(4, 1, GridOrientation::East, 0, 1, "player1"),
+                "\
+wait()\n
+move_forward()\n
+print('yeah!')\n
+            "
+                .to_owned(),
+            ),
+            (
+                GridPlayerState::new(4, 6, GridOrientation::East, 0, 1, "player2"),
+                "\
+print('second')\n
+looked = look('left')\n
+print(looked)\n
+print('second yeah!')\n
+if looked == [('empty_tile', None), ('wall', None)]:\n
+    print('wall')\n
+    move_forward()\n
+    looked = look('left')\n
+    print(looked)\n
+    if looked == [('empty_tile', None)]*4 + [('empty_tile', 'player[player1][right-side]')]:\n
+        move_forward()\n
+\
+            "
+                .to_owned(),
+            ),
+        ],
+        |b| {
+            assert_eq!(50, b.time());
+            assert_eq!(6, b.player_state(1).col);
+            assert_eq!(6, b.player_state(1).row);
+        },
+    );
+}
 
 #[test]
 fn test_check_hit_dir() {
@@ -164,6 +203,8 @@ wait()\n
 mid_hit = check_hit()\n
 turn_cw()\n
 wait()\n
+wait()\n
+wait()\n
 end_hit = check_hit()\n
 same_end_hit = check_hit()\n
 print(start_hit, mid_hit, end_hit, same_end_hit)\n
@@ -176,7 +217,6 @@ if start_hit is None and mid_hit == 'left' and end_hit == 'back' and same_end_hi
                 GridPlayerState::new(30, 7, GridOrientation::West, 2, 10, "player2"),
                 "\
 shoot()\n
-wait()\n
 shoot()\n
             "
                 .to_owned(),
@@ -188,7 +228,6 @@ shoot()\n
         },
     );
 }
-
 
 #[test]
 fn test_check_health_ammo() {
