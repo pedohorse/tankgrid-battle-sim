@@ -16,6 +16,7 @@ use super::simple_object::{ObjectCacheType, SimpleObject};
 use std::collections::HashMap;
 use std::hash::Hash;
 use std::marker::PhantomData;
+use std::vec;
 
 use rustpython_vm::convert::ToPyObject;
 use rustpython_vm::scope::Scope;
@@ -310,7 +311,7 @@ where
                             self.object_layer.remove_object(obj_id);
                         }
                     };
-                    (PlayerCommandReply::Ok, None)
+                    (PlayerCommandReply::Ok, Some(vec![PlayerCommand::Wait, PlayerCommand::Wait, PlayerCommand::Wait]))  // some wait after shooting
                 } else {
                     (PlayerCommandReply::Failed, None)
                 }
@@ -339,10 +340,14 @@ where
                                     "front"
                                 } else if obj.orientation().same_as(&ori) {
                                     "back"
+                                } else if obj.orientation().left_of(&ori) {
+                                    "left-side"
+                                } else if obj.orientation().right_of(&ori) {
+                                    "right-side"
                                 } else {
-                                    "side"
+                                    "unknown"
                                 };
-                                format!("{}({})", obj.to_script_repr(), obj_ori)
+                                format!("{}[{}]", obj.to_script_repr(), obj_ori)
                             }),
                         )
                     })
