@@ -68,7 +68,7 @@ impl<P, BLogic, PCom, PComRep, LW> Battle<P, BLogic, PCom, PComRep, LW>
 where
     P: PlayerControl + ToScriptRepr + LogRepresentable,
     BLogic: BattleLogic<P, PCom, PComRep, String, String>,
-    PCom: LogRepresentable + Hash + Copy + PartialEq + Eq + Send + 'static,
+    PCom: LogRepresentable + Hash + Clone + PartialEq + Eq + Send + 'static,
     PComRep: CommandReplyStat + Send + 'static,
     LW: LogWriter<String, String>,
 {
@@ -240,15 +240,15 @@ where
                         let duration = self
                             .battle_logic
                             .get_command_duration(&self.player_states[i], &com);
-                        next_commands[i] =
-                            PlayerCommandState::GotCommand(com, false, self.time, duration, command_id);
                         // note, this log is same as below. TODO: can merge?
                         self.log_writer.add_log_data(
                             self.player_states[i].log_repr(),
-                            format!("-{}({})", com.to_log_repr(), command_id),
+                            format!("-{}({})", com.log_repr(), command_id),
                             self.time,
                             duration,
                         );
+                        next_commands[i] =
+                            PlayerCommandState::GotCommand(com, false, self.time, duration, command_id);
                         players_that_have_commands += 1;
                         continue;
                     }
@@ -261,16 +261,16 @@ where
                             let duration = self
                                 .battle_logic
                                 .get_command_duration(&self.player_states[i], &com);
-                            next_commands[i] = PlayerCommandState::GotCommand(
-                                com, true, self.time, duration, command_id,
-                            );
 
                             // note - operation logged here MAY not complete, depending on concrete game logic
                             self.log_writer.add_log_data(
                                 player_state.log_repr(),
-                                format!("-{}({})", com.to_log_repr(), command_id),
+                                format!("-{}({})", com.log_repr(), command_id),
                                 self.time,
                                 duration,
+                            );
+                            next_commands[i] = PlayerCommandState::GotCommand(
+                                com, true, self.time, duration, command_id,
                             );
                             players_that_have_commands += 1;
                             continue;
@@ -387,7 +387,7 @@ where
 
                         let (reply, extra_actions_maybe) = self.battle_logic.process_commands(
                             player_i,
-                            com,
+                            &com,
                             &mut self.player_states,
                             &mut |obj, act| {
                                 self.log_writer.add_log_data(obj, act, self.time, 0);
@@ -417,7 +417,7 @@ where
                             format!(
                                 "{}{}({})",
                                 if command_succeeded { "+" } else { "!" },
-                                com.to_log_repr(),
+                                com.log_repr(),
                                 command_id,
                             ),
                             self.time,

@@ -14,8 +14,9 @@ pub struct GridPlayerState {
     pub row: i64,
     pub col: i64,
     pub orientation: GridOrientation,
-    pub ammo: u64,  // TODO: these should net be so specific, no point
-    pub health: u64,  // TODO: and below res ids are hardcoded to these values
+    //pub ammo: u64,  // TODO: these should net be so specific, no point
+    //pub health: u64,  // TODO: and below res ids are hardcoded to these values
+    resources: Vec<u64>,
     last_hit_repr: u64,
     pub name: String,
     unique_id: u64,
@@ -26,16 +27,14 @@ impl GridPlayerState {
         col: i64,
         row: i64,
         orientation: GridOrientation,
-        ammo: u64,
-        health: u64,
+        init_resources: Vec<u64>,
         name: &str,
     ) -> GridPlayerState {
         GridPlayerState {
             row,
             col,
             orientation,
-            ammo,
-            health,
+            resources: init_resources,
             last_hit_repr: 0,
             name: name.to_owned(),
             unique_id: NEXT_OBJID.fetch_add(1, Ordering::Relaxed),
@@ -85,41 +84,33 @@ impl PlayerControl for GridPlayerState
     }
 
     fn expend_resource(&mut self, res_id: usize, amount: u64) {
-        let res = match res_id {
-            0 => &mut self.health,
-            1 => &mut self.ammo,
-            _ => return,
-        };
-
+        self.expand_resources_to_fit(res_id);
+        let res = &mut self.resources[res_id];
         *res = if amount >= *res { 0 } else { *res - amount };
     }
 
     fn gain_resource(&mut self, res_id: usize, amount: u64) {
-        let res = match res_id {
-            0 => &mut self.health,
-            1 => &mut self.ammo,
-            _ => return,
-        };
+        self.expand_resources_to_fit(res_id);
+        let res = &mut self.resources[res_id];
         *res += amount;
     }
 
     fn resource_value(&self, res_id: usize) -> u64 {
-        match res_id {
-            0 => self.health,
-            1 => self.ammo,
-            2 => self.last_hit_repr,
-            _ => 0,
-        }
+        *self.resources.get(res_id).unwrap_or(&0)
     }
 
     fn set_resource(&mut self, res_id: usize, amount: u64) {
-        let res = match res_id {
-            0 => &mut self.health,
-            1 => &mut self.ammo,
-            2 => &mut self.last_hit_repr,
-            _ => return,
-        };
+        self.expand_resources_to_fit(res_id);
+        let res = &mut self.resources[res_id];
         *res = amount;
+    }
+}
+
+impl GridPlayerState {
+    fn expand_resources_to_fit(&mut self, res_id: usize) {
+        if res_id > self.resources.len() - 1 {
+            self.resources.resize(res_id + 1, 0);
+        }
     }
 }
 
@@ -129,8 +120,7 @@ impl MapObject<GridOrientation> for GridPlayerState {
             row: source.row,
             col: source.col,
             orientation: source.orientation,
-            ammo: source.ammo,
-            health: source.health,
+            resources: source.resources.clone(),
             last_hit_repr: source.last_hit_repr,
             name: source.name.clone(),
             unique_id: new_uid,

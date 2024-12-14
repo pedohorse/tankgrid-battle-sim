@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 use std::hash::Hash;
+use std::marker::PhantomData;
 
 use battle_sim::gametime::GameTime;
 use battle_sim::log_data::{LogRepresentable, LogWriter};
@@ -130,6 +131,14 @@ pub struct HashmapCommandTimer<PC> {
     default: GameTime,
 }
 
+pub struct FnCommandTimer<PC, F>
+where
+    F: Fn(&PC) -> GameTime,
+{
+    fnfn: F,
+    _marker: PhantomData<PC>,
+}
+
 impl<PC> CommandTimer<PC> for HashmapCommandTimer<PC>
 where
     PC: Eq + Hash,
@@ -143,11 +152,32 @@ where
     }
 }
 
+impl<PC, F> CommandTimer<PC> for FnCommandTimer<PC, F> 
+where
+    F: Fn(&PC) -> GameTime,
+{
+    fn get_base_duration(&self, command: &PC) -> GameTime {
+        (self.fnfn)(command)
+    }
+}
+
 impl<PC> HashmapCommandTimer<PC> {
-    pub fn new(hashmap: HashMap<PC, GameTime>, default: GameTime) -> HashmapCommandTimer<PC>{
+    pub fn new(hashmap: HashMap<PC, GameTime>, default: GameTime) -> HashmapCommandTimer<PC> {
         HashmapCommandTimer {
             durations: hashmap,
-            default
+            default,
+        }
+    }
+}
+
+impl<PC, F>  FnCommandTimer<PC, F> 
+where
+    F: Fn(&PC) -> GameTime,
+{
+    pub fn new(mapper: F) -> FnCommandTimer<PC, F> {
+        FnCommandTimer {
+            fnfn: mapper,
+            _marker: PhantomData{},
         }
     }
 }

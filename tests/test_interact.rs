@@ -1,6 +1,6 @@
 use battle_sim::map::MapWriteAccess;
 use battle_sim::object_layer::ObjectLayer;
-use battle_sim::r#impl::grid_battle::{GridBattle, GridPlayerState};
+use battle_sim::r#impl::grid_battle::{GridBattle, GridPlayerState, new_player};
 use battle_sim::r#impl::grid_map::GridBattleMap;
 use battle_sim::r#impl::grid_map_prober::GridMapProber;
 use battle_sim::r#impl::grid_orientation::GridOrientation;
@@ -59,7 +59,7 @@ where
                     (PlayerCommand::CheckHealth, 2),
                     (PlayerCommand::CheckHit, 2),
                 ]),
-                10,
+                0,
             ),
             0,
         ),
@@ -77,7 +77,7 @@ fn test_look_out_bounds() {
     test_base(
         vec![
             (
-                GridPlayerState::new(20, 10, GridOrientation::South, 0, 1, "player1"),
+                new_player(20, 10, GridOrientation::South, 0, 1, "player1"),
                 "\
 print('hell-o')\n
 turn_cw()\n
@@ -88,7 +88,7 @@ print('yeah!')\n
                 .to_owned(),
             ),
             (
-                GridPlayerState::new(20, 5, GridOrientation::East, 0, 1, "player2"),
+                new_player(20, 5, GridOrientation::East, 0, 1, "player2"),
                 "\
 print('second')\n
 looked = look('right')\n
@@ -115,7 +115,7 @@ fn test_look_on_map_right() {
     test_base(
         vec![
             (
-                GridPlayerState::new(4, 7, GridOrientation::East, 0, 1, "player1"),
+                new_player(4, 7, GridOrientation::East, 0, 1, "player1"),
                 "\
 wait()\n
 move_forward()\n
@@ -124,7 +124,7 @@ print('yeah!')\n
                 .to_owned(),
             ),
             (
-                GridPlayerState::new(4, 2, GridOrientation::East, 0, 1, "player2"),
+                new_player(4, 2, GridOrientation::East, 0, 1, "player2"),
                 "\
 print('second')\n
 looked = look('right')\n
@@ -155,7 +155,7 @@ fn test_look_on_map_left() {
     test_base(
         vec![
             (
-                GridPlayerState::new(4, 1, GridOrientation::East, 0, 1, "player1"),
+                new_player(4, 1, GridOrientation::East, 0, 1, "player1"),
                 "\
 wait()\n
 move_forward()\n
@@ -164,7 +164,7 @@ print('yeah!')\n
                 .to_owned(),
             ),
             (
-                GridPlayerState::new(4, 6, GridOrientation::East, 0, 1, "player2"),
+                new_player(4, 6, GridOrientation::East, 0, 1, "player2"),
                 "\
 print('second')\n
 looked = look('left')\n
@@ -195,7 +195,7 @@ fn test_check_hit_dir() {
     test_base(
         vec![
             (
-                GridPlayerState::new(20, 7, GridOrientation::South, 2, 10, "player1"),
+                new_player(20, 7, GridOrientation::South, 2, 10, "player1"),
                 "\
 start_hit = check_hit()\n
 wait()\n
@@ -214,7 +214,7 @@ if start_hit is None and mid_hit == 'left' and end_hit == 'back' and same_end_hi
                 .to_owned(),
             ),
             (
-                GridPlayerState::new(30, 7, GridOrientation::West, 2, 10, "player2"),
+                new_player(30, 7, GridOrientation::West, 2, 10, "player2"),
                 "\
 shoot()\n
 shoot()\n
@@ -234,7 +234,7 @@ fn test_check_health_ammo() {
     test_base(
         vec![
             (
-                GridPlayerState::new(20, 7, GridOrientation::South, 2, 10, "player1"),
+                new_player(20, 7, GridOrientation::South, 2, 10, "player1"),
                 "\
 start_health = check_health()\n
 wait()\n
@@ -246,7 +246,7 @@ if start_health == 10 and end_health == 9:\n
                 .to_owned(),
             ),
             (
-                GridPlayerState::new(30, 7, GridOrientation::West, 2, 10, "player2"),
+                new_player(30, 7, GridOrientation::West, 2, 10, "player2"),
                 "\
 start_ammo = check_ammo()\n
 shoot()\n

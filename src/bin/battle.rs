@@ -2,7 +2,7 @@ use battle_sim::map::MapReadAccess;
 use battle_sim::maptile_logic::MaptileLogic;
 use battle_sim::object_layer::{self, ObjectLayer};
 use battle_sim::r#impl::buf_battle_logger::BufferLogWriter;
-use battle_sim::r#impl::grid_battle::{GridBattle, GridPlayerState};
+use battle_sim::r#impl::grid_battle::{GridBattle, GridPlayerState, new_player};
 use battle_sim::r#impl::grid_map::GridBattleMap;
 use battle_sim::r#impl::grid_map_prober::GridMapProber;
 use battle_sim::r#impl::grid_orientation::GridOrientation;
@@ -39,6 +39,7 @@ impl CommandTimer<PlayerCommand<GridOrientation>> for CommandTimings {
             PlayerCommand::CheckAmmo => 2,
             PlayerCommand::CheckHealth => 2,
             PlayerCommand::CheckHit => 2,
+            PlayerCommand::Print(_) => 0,
         }
     }
 }
@@ -118,7 +119,7 @@ fn main() -> ExitCode {
 
         let name: &str = player_program_file.file_stem().map(|x| x.to_str().unwrap_or("player")).unwrap_or("player");
         player_initial_data.push((
-            GridPlayerState::new(x, y, ori, 5, 5, name),
+            new_player(x, y, ori, 5, 5, name),
             player_program,
         ));
     }

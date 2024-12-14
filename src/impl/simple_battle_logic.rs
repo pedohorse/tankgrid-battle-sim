@@ -13,22 +13,26 @@ use crate::script_repr::{FromScriptRepr, ToScriptRepr};
 
 use super::simple_object::{ObjectCacheType, SimpleObject};
 
-use std::collections::HashMap;
 use std::hash::Hash;
 use std::marker::PhantomData;
 use std::vec;
 
 use rustpython_vm::convert::ToPyObject;
+use rustpython_vm::function::FuncArgs;
 use rustpython_vm::scope::Scope;
 use rustpython_vm::{PyResult, VirtualMachine};
 
-#[derive(Clone, Copy, PartialEq, Eq, Hash)]
+pub const MAX_LOG_LINE_LENGTH: usize = 160;
+pub const MAX_FREE_PRINTS: u64 = 6;  // 5 prints, 1 for warning
+
+#[derive(Clone, PartialEq, Eq, Hash)]
 pub enum PlayerCommand<R> {
     MoveFwd,
     TurnCW,
     TurnCCW,
     Shoot,
     Wait,
+    Print(String),
     CheckAmmo,
     CheckHealth,
     CheckHit, // checks from which side was last hit
@@ -54,6 +58,7 @@ where
             PlayerCommand::CheckAmmo => format!("check-ammo"),
             PlayerCommand::CheckHealth => format!("check-health"),
             PlayerCommand::CheckHit => format!("check-hit"),
+            PlayerCommand::Print(_) => format!("log-print"), // just log command, not the contents
         }
     }
 }
@@ -101,9 +106,10 @@ where
     _marker1: PhantomData<T>,
 }
 
-const HEALTH_RES: usize = 0;
-const AMMO_RES: usize = 1;
-const HIT_DIR_RES: usize = 2;
+pub const HEALTH_RES: usize = 0;
+pub const AMMO_RES: usize = 1;
+pub const HIT_DIR_RES: usize = 2;
+pub const PRINT_COUNTER_RES: usize = 3;
 
 impl<T, M, L, R, P, Pr, OLayer, Fdur>
     BattleLogic<P, PlayerCommand<R>, PlayerCommandReply<R>, String, String>
@@ -180,13 +186,21 @@ where
     fn process_commands<LWF>(
         &mut self,
         player_i: usize,
-        com: PlayerCommand<R>,
+        com: &PlayerCommand<R>,
         player_states: &mut [P],
         logger: &mut LWF,
     ) -> (PlayerCommandReply<R>, Option<Vec<PlayerCommand<R>>>)
     where
         LWF: FnMut(String, String),
     {
+        // doing any command other than print resets the print counter
+        match com {
+            PlayerCommand::Print(_) => (), // do nothing, we expend in the next match
+            _ => {
+                player_states[player_i].set_resource(PRINT_COUNTER_RES, MAX_FREE_PRINTS);
+            }
+        }
+
         match com {
             PlayerCommand::MoveFwd => {
                 self.recache_players_to_object_layer(player_states);
@@ -311,7 +325,14 @@ where
                             self.object_layer.remove_object(obj_id);
                         }
                     };
-                    (PlayerCommandReply::Ok, Some(vec![PlayerCommand::Wait, PlayerCommand::Wait, PlayerCommand::Wait]))  // some wait after shooting
+                    (
+                        PlayerCommandReply::Ok,
+                        Some(vec![
+                            PlayerCommand::Wait,
+                            PlayerCommand::Wait,
+                            PlayerCommand::Wait,
+                        ]),
+                    ) // some wait after shooting
                 } else {
                     (PlayerCommandReply::Failed, None)
                 }
@@ -357,12 +378,12 @@ where
             }
             PlayerCommand::AddAmmo(ammo) => {
                 let player_state = &mut player_states[player_i];
-                player_state.gain_resource(AMMO_RES, ammo);
+                player_state.gain_resource(AMMO_RES, *ammo);
                 (PlayerCommandReply::Ok, None)
             }
             PlayerCommand::AddHealth(health) => {
                 let player_state = &mut player_states[player_i];
-                player_state.gain_resource(HEALTH_RES, health);
+                player_state.gain_resource(HEALTH_RES, *health);
                 (PlayerCommandReply::Ok, None)
             }
             PlayerCommand::CheckAmmo => {
@@ -385,6 +406,20 @@ where
                 };
                 player_state.set_resource(HIT_DIR_RES, 0); // once read - last hit is set back to None
                 (PlayerCommandReply::HitDirection(hit_direction), None)
+            }
+            PlayerCommand::Print(ref line) => {
+                let player_state = &mut player_states[player_i];
+                let mut penalty = None;
+                match player_state.resource_value(PRINT_COUNTER_RES) {
+                    0 => penalty = Some(vec![PlayerCommand::Wait; 4]), // penalize player for abusing print with forced waits
+                    1 => logger(
+                        player_state.log_repr(),
+                        "log[---next print will be muted and penalized with game time unless a valid game comand called---]".to_owned(),
+                    ),
+                    _ => logger(player_state.log_repr(), format!("log[{}]", line)),
+                }
+                player_state.expend_resource(PRINT_COUNTER_RES, 1);
+                (PlayerCommandReply::Ok, penalty)
             }
         }
     }
@@ -465,6 +500,36 @@ where
             move |vm: &VirtualMachine| -> PyResult<()> {
                 println!("TEST: wait");
                 let _ret = comm_chan(PlayerCommand::Wait);
+                PyResult::Ok(())
+            }
+        });
+        add_function!("print", {
+            let comm_chan = comm_chan.clone();
+            move |args: FuncArgs, vm: &VirtualMachine| -> PyResult<()> {
+                println!("TEST: print");
+                let line = args
+                    .args
+                    .into_iter()
+                    .map(|arg| -> String {
+                        arg.try_into_value(vm)
+                            .unwrap_or_else(|_| "<unprintable>".to_owned())
+                    })
+                    .fold(None, |a, b| {
+                        Some(if let Some(s) = a {
+                            s + " " + b.as_str()
+                        } else {
+                            b
+                        })
+                    })
+                    .unwrap_or_default();
+                // sanitize string!
+
+                let line: String = line
+                    .chars()
+                    .take(MAX_LOG_LINE_LENGTH)
+                    .map(|c| if c.is_control() { '_' } else { c })
+                    .collect();
+                let _ret = comm_chan(PlayerCommand::Print(line));
                 PyResult::Ok(())
             }
         });

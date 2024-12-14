@@ -26,7 +26,7 @@ where
     fn process_commands<LWF>(
         &mut self,
         player_i: usize,
-        com: PCom,
+        com: &PCom,
         player_states: &mut [P],
         logger: &mut LWF,
     ) -> (PComRep, Option<Vec<PCom>>)
