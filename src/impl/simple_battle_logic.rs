@@ -35,7 +35,8 @@ pub enum PlayerCommand<R> {
     Print(String),
     CheckAmmo,
     CheckHealth,
-    CheckHit, // checks from which side was last hit
+    CheckHit, // checks from which side was last hit (hit info is reset after check)
+    ResetHit, // forcefully ignore last hit info. supposed to be faster than CheckHit
     Look(R),
     AddAmmo(u64),   // generated after picking up ammo crate
     AddHealth(u64), // generated after picking up health
@@ -58,6 +59,7 @@ where
             PlayerCommand::CheckAmmo => format!("check-ammo"),
             PlayerCommand::CheckHealth => format!("check-health"),
             PlayerCommand::CheckHit => format!("check-hit"),
+            PlayerCommand::ResetHit => format!("reset-hit"),
             PlayerCommand::Print(_) => format!("log-print"), // just log command, not the contents
         }
     }
@@ -407,6 +409,11 @@ where
                 player_state.set_resource(HIT_DIR_RES, 0); // once read - last hit is set back to None
                 (PlayerCommandReply::HitDirection(hit_direction), None)
             }
+            PlayerCommand::ResetHit => {
+                let player_state = &mut player_states[player_i];
+                player_state.set_resource(HIT_DIR_RES, 0);
+                (PlayerCommandReply::Ok, None)
+            }
             PlayerCommand::Print(ref line) => {
                 let player_state = &mut player_states[player_i];
                 let mut penalty = None;
@@ -612,6 +619,14 @@ where
                         vm.new_runtime_error(format!("unexpected check result: {:?}", ret)),
                     )
                 }
+            }
+        });
+        add_function!("reset_hit", {
+            let comm_chan = comm_chan.clone();
+            move |_vm: &VirtualMachine| -> PyResult<()> {
+                println!("TEST: reset_hit");
+                let _ret = comm_chan(PlayerCommand::ResetHit);
+                PyResult::Ok(())
             }
         });
     }
