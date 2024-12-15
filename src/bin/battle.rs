@@ -39,6 +39,7 @@ impl CommandTimer<PlayerCommand<GridOrientation>> for CommandTimings {
             PlayerCommand::CheckAmmo => 2,
             PlayerCommand::CheckHealth => 2,
             PlayerCommand::CheckHit => 2,
+            PlayerCommand::ResetHit => 1,
             PlayerCommand::Print(_) => 0,
         }
     }
