@@ -465,7 +465,7 @@ where
             // TODO: figure out why do I have to downgrade refs?
             //  it's as if interpreter is not dropped properly and keeps refs
             let comm_chan = comm_chan.clone();
-            move |vm: &VirtualMachine| -> PyResult<()> {
+            move |_vm: &VirtualMachine| -> PyResult<()> {
                 println!("TEST: turn_cw");
                 let _ret = comm_chan(PlayerCommand::TurnCW);
                 PyResult::Ok(())
@@ -473,7 +473,7 @@ where
         });
         add_function!("turn_ccw", {
             let comm_chan = comm_chan.clone();
-            move |vm: &VirtualMachine| -> PyResult<()> {
+            move |_vm: &VirtualMachine| -> PyResult<()> {
                 println!("TEST: turn_ccw");
                 let _ret = comm_chan(PlayerCommand::TurnCCW);
                 PyResult::Ok(())
@@ -481,7 +481,7 @@ where
         });
         add_function!("move_forward", {
             let comm_chan = comm_chan.clone();
-            move |vm: &VirtualMachine| -> PyResult<()> {
+            move |_vm: &VirtualMachine| -> PyResult<()> {
                 println!("TEST: move_forward");
                 let _ret = comm_chan(PlayerCommand::MoveFwd);
                 PyResult::Ok(())
@@ -489,7 +489,7 @@ where
         });
         add_function!("shoot", {
             let comm_chan = comm_chan.clone();
-            move |vm: &VirtualMachine| -> PyResult<()> {
+            move |_vm: &VirtualMachine| -> PyResult<()> {
                 println!("TEST: shoot");
                 let _ret = comm_chan(PlayerCommand::Shoot);
                 PyResult::Ok(())
@@ -497,7 +497,7 @@ where
         });
         add_function!("wait", {
             let comm_chan = comm_chan.clone();
-            move |vm: &VirtualMachine| -> PyResult<()> {
+            move |_vm: &VirtualMachine| -> PyResult<()> {
                 println!("TEST: wait");
                 let _ret = comm_chan(PlayerCommand::Wait);
                 PyResult::Ok(())
