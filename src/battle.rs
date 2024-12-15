@@ -1,6 +1,6 @@
 use std::cmp::Eq;
 use std::collections::VecDeque;
-use std::hash::Hash;
+use std::hash::{DefaultHasher, Hash, Hasher};
 use std::marker::PhantomData;
 use std::mem;
 use std::sync::mpsc::TryRecvError;
@@ -16,7 +16,10 @@ use super::log_data::{LogRepresentable, LogWriter};
 use super::player_state::PlayerControl;
 use super::script_repr::ToScriptRepr;
 
-use rustpython_vm::{vm, Settings};
+use rand::distributions::Uniform;
+use rand::prelude::*;
+
+use rustpython_vm::Settings;
 use rustpython_vm::{
     compiler,
     signal::{user_signal_channel, UserSignalReceiver},
@@ -129,13 +132,17 @@ where
 
                 let handle = scope.spawn({
                     let program = program.clone();
-                    || {
+                    let mut program_hasher = DefaultHasher::new();
+                    program_hasher.write(program.as_bytes());
+                    let program_hash = program_hasher.finish();
+                    move || {
                         Self::program_runner(
                             program,
                             command_sender,
                             result_receiver,
                             thread_stop_receiver,
                             thead_ready_tx,
+                            program_hash, //88284664
                         )
                     }
                 });
@@ -247,8 +254,9 @@ where
                             self.time,
                             duration,
                         );
-                        next_commands[i] =
-                            PlayerCommandState::GotCommand(com, false, self.time, duration, command_id);
+                        next_commands[i] = PlayerCommandState::GotCommand(
+                            com, false, self.time, duration, command_id,
+                        );
                         players_that_have_commands += 1;
                         continue;
                     }
@@ -345,35 +353,30 @@ where
                     }
 
                     // if not done - select command to execute and advance time
-                    if let Some((remaining_duration, player_i, next_command)) =
-                        next_commands
-                            .iter_mut()
-                            .enumerate()
-                            .filter(|(_, k)| {
-                                // filter out Finish commands
-                                if let PlayerCommandState::Finish = k {
-                                    false
+                    if let Some((remaining_duration, player_i, next_command)) = next_commands
+                        .iter_mut()
+                        .enumerate()
+                        .filter(|(_, k)| {
+                            // filter out Finish commands
+                            if let PlayerCommandState::Finish = k {
+                                false
+                            } else {
+                                true
+                            }
+                        })
+                        .map(|(player_i, k)| {
+                            // calc remaining duration and other useful things
+                            let (_com, command_start_gametime, duration) =
+                                if let PlayerCommandState::GotCommand(x, _, y, dur, _) = k {
+                                    (x, y, *dur)
                                 } else {
-                                    true
-                                }
-                            })
-                            .map(|(player_i, k)| {
-                                // calc remaining duration and other useful things
-                                let (com, command_start_gametime, duration) =
-                                    if let PlayerCommandState::GotCommand(x, _, y, dur, _) = k {
-                                        (x, y, *dur)
-                                    } else {
-                                        // filter above must have filtered Finish out, and None must not happen cuz of prev logic
-                                        unreachable!();
-                                    };
-                                //
-                                (
-                                    *command_start_gametime + duration - self.time,
-                                    player_i,
-                                    k,
-                                )
-                            })
-                            .min_by_key(|k| k.0)
+                                    // filter above must have filtered Finish out, and None must not happen cuz of prev logic
+                                    unreachable!();
+                                };
+                            //
+                            (*command_start_gametime + duration - self.time, player_i, k)
+                        })
+                        .min_by_key(|k| k.0)
                     {
                         // process the next command
 
@@ -465,6 +468,7 @@ where
         reply_channel: mpsc::Receiver<PComRep>, // PlayerCommandReply<(String, Option<String>)>
         vm_signal_receiver: UserSignalReceiver,
         thread_ready_signal: mpsc::Sender<()>,
+        seed: u64,
     ) -> Result<(), String> {
         macro_rules! send_command {
             ($vm:ident, $command_channel:ident, $reply_channel:ident, $cmd:expr) => {{
@@ -507,6 +511,21 @@ where
         });
         let ret = interpreter.enter(|vm| {
             let scope = vm.new_scope_with_builtins();
+
+            // add some logic-independent functions
+            scope
+                .globals
+                .set_item(
+                    "rand",
+                    vm.new_function("rand", {
+                        let rng = Rc::new(RefCell::new(StdRng::seed_from_u64(seed)));
+                        let uniform = Uniform::new(0 as f64, 1 as f64);
+                        move || -> PyResult<f64> { PyResult::Ok(rng.borrow_mut().sample(uniform)) }
+                    })
+                    .into(),
+                    vm,
+                )
+                .unwrap();
 
             BLogic::initialize_scope(vm, &scope, {
                 let reply_channel = Rc::downgrade(&reply_channel);
