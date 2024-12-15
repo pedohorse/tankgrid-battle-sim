@@ -23,7 +23,7 @@ use rustpython_vm::scope::Scope;
 use rustpython_vm::{PyResult, VirtualMachine};
 
 pub const MAX_LOG_LINE_LENGTH: usize = 160;
-pub const MAX_FREE_PRINTS: u64 = 6;  // 5 prints, 1 for warning
+pub const MAX_FREE_PRINTS: u64 = 6; // 5 prints, 1 for warning
 
 #[derive(Clone, PartialEq, Eq, Hash)]
 pub enum PlayerCommand<R> {
@@ -511,8 +511,8 @@ where
                     .args
                     .into_iter()
                     .map(|arg| -> String {
-                        arg.try_into_value(vm)
-                            .unwrap_or_else(|_| "<unprintable>".to_owned())
+                        arg.str(vm)
+                            .map_or_else(|_| "<unprintable>".to_owned(), |s| s.as_str().to_owned())
                     })
                     .fold(None, |a, b| {
                         Some(if let Some(s) = a {
