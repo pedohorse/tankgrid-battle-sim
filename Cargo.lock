@@ -72,7 +72,6 @@ checksum = "ace50bade8e6234aa140d9a2f552bbee1db4d353f69b8217bc503490fc1a9f26"
 name = "battle-sim"
 version = "0.1.0"
 dependencies = [
- "map-lib",
  "rand",
  "rustpython-vm",
  "serde",
@@ -567,13 +566,6 @@ dependencies = [
  "itertools",
  "malachite-base",
  "malachite-nz",
-]
-
-[[package]]
-name = "map-lib"
-version = "0.1.0"
-dependencies = [
- "serde",
 ]
 
 [[package]]

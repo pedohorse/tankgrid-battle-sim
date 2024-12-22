@@ -2,8 +2,8 @@ use std::{fs, io};
 
 use super::grid_map::GridBattleMap;
 use crate::serialization::{FromFile, ToFile};
+use crate::map_data::MapData;
 
-use map_lib::MapData;
 use serde::de::DeserializeOwned;
 use serde::ser::Serialize;
 use serde_json;

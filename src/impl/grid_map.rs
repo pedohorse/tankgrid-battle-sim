@@ -1,5 +1,5 @@
 use crate::map::{MapReadAccess, MapWriteAccess};
-use map_lib::MapData;
+use crate::map_data::MapData;
 use std::{path::Path, vec::Vec};
 
 use super::grid_orientation::GridOrientation;
