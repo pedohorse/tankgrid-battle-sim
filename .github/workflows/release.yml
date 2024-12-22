@@ -1,0 +1,48 @@
+on:
+  push:
+    tags: [ "v*" ]
+
+name: Release
+
+jobs:
+  tests:
+    uses: ./.github/workflows/test.yml
+
+  build:
+    needs: [ "tests" ]
+    name: build
+    runs-on: "ubuntu-latest"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: stable
+      - name: get deps
+        run: |
+          sudo apt install --assume-yes --no-install-recommends \
+          gcc
+      - name: build release
+        run: |
+          cargo build --release --bin battle
+          cargo build --release --bin mapgen
+      - uses: actions/upload-artifact@master
+        with:
+          name: build_linux
+          path: |
+            target/release/battle
+            target/release/mapgen
+
+  release:
+    name: make release
+    runs-on: ubuntu-latest
+    needs: build
+    steps:
+      - uses: actions/download-artifact@master
+        with:
+          path: artifacts
+      - name: make release
+        uses: softprops/action-gh-release@v1
+        with:
+          files: |
+            artifacts/*/battle
+            artifacts/*/mapgen
