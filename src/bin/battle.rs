@@ -33,6 +33,7 @@ impl CommandTimer<PlayerCommand<GridOrientation>> for CommandTimings {
             PlayerCommand::TurnCCW => 15,
             PlayerCommand::Shoot => 5,
             PlayerCommand::Look(_) => 4,
+            PlayerCommand::Listen => 3,
             PlayerCommand::Wait => 5,
             PlayerCommand::AddAmmo(_) => 2,
             PlayerCommand::AddHealth(_) => 2,
