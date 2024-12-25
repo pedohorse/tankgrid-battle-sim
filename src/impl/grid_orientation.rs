@@ -153,6 +153,14 @@ impl SimpleOrientation for GridOrientation {
         }
     }
 
+    fn codirected_with(&self, other: &Self) -> bool {
+        return *self == *other
+    }
+
+    fn counterdirected_with(&self, other: &Self) -> bool {
+        return self.opposite() == *other
+    }
+
 
     fn turn_cw(&self) -> Self{
         match self {
@@ -196,4 +204,38 @@ impl SimpleOrientation for GridOrientation {
             GridOrientation::West => self.turn_cw(),
         }
     }
+
+    fn direction_to_closest_orientations(from: (i64, i64), to: (i64, i64)) -> (Self, Option<Self>) {
+        let dir = (to.0 - from.0, to.1 - from.1);
+
+        let xori = if dir.0 >= 0 {
+            GridOrientation::East
+        } else {
+            GridOrientation::West
+        };
+        let yori = if dir.1 <= 0 { // <= cuz y grows down
+            GridOrientation::North
+        } else {
+            GridOrientation::South
+        };
+
+        if dir.0 == 0 {
+            (yori, None)
+        } else if dir.1 == 0 {
+            (xori, None)
+        } else if dir.1.abs() >= dir.0.abs() {
+            (yori, Some(xori))
+        } else {
+            (xori, Some(yori))
+        }
+    }
+}
+
+
+mod tests {
+    use crate::orientation::main_logic_tests;
+    use super::GridOrientation;
+    use super::SimpleOrientation;
+
+    main_logic_tests!(grid_tests, GridOrientation::North, GridOrientation::East, GridOrientation::South, GridOrientation::West);
 }
