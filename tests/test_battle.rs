@@ -633,12 +633,87 @@ while True:\n
     assert!(8 == log_lines.len());
     assert!(log_lines[0].1.starts_with("spawn"));
     assert!(log_lines[1].1.starts_with("spawn"));
-    assert!(
-        log_lines[2].1.starts_with("-move-forward") && log_lines[3].1.starts_with("-shoot")
-            || log_lines[3].1.starts_with("-move-forward") && log_lines[2].1.starts_with("-shoot")
-    );
+    assert!(log_lines[2].1.starts_with("-move-forward"));
+    assert!(log_lines[3].1.starts_with("-shoot"));
     assert!(log_lines[4].1.starts_with("shoot"));
     assert!(log_lines[5].1.starts_with("+shoot"));
     assert!(log_lines[6].1.starts_with("die"));
     assert!(log_lines[7].1.starts_with("win"));
+}
+
+
+#[test]
+fn test_4players_log_order() {
+    let map = GridBattleMap::new(3, 3, SimpleTileType::Nothin, SimpleTileType::Nothin);
+    let logger = VecLogWriter::new();
+    let mut b = GridBattle::new(
+        SimpleBattleLogic::new(
+            map,
+            TestTrivialLogic {},
+            GridMapProber {},
+            SimpleBattleObjectLayer::new(),
+            FnCommandTimer::new(|com| match com {
+                PlayerCommand::TurnCW => 10,
+                PlayerCommand::MoveFwd => 20,
+                PlayerCommand::Shoot => 5,
+                PlayerCommand::Print(_) => 0,
+                _ => 10,
+            }),
+            0,
+        ),
+        vec![
+            (
+                new_player(1, 1, GridOrientation::West, 1, 1, "player1"),
+                "\
+                    a = list(range(1000)) * 10  # artificial delay\n\
+                    move_forward()\n
+                "
+                .to_owned(),
+            ),
+            (
+                new_player(2, 1, GridOrientation::West, 1, 1, "player2"),
+                "\
+                    a = 1  # artificial delay\n\
+                    b = 1\n\
+                    for i in range(100):\n
+                        c = a + b\n
+                        a = b\n
+                        b = c\n\
+                    turn_cw()\n\
+                "
+                .to_owned(),
+            ),
+            (
+                new_player(3, 1, GridOrientation::West, 1, 1, "player3"),
+                "\
+                    a = [2 * 3 * i for i in range(10)]  # artificial delay\n\
+                    turn_ccw()\n
+                "
+                .to_owned(),
+            ),
+            (
+                new_player(2, 1, GridOrientation::West, 1, 1, "player4"),
+                "\
+                    shoot()\n
+                "
+                .to_owned(),
+            ),
+        ],
+        logger,
+    );
+    b.run_simulation();
+    println!("BATTLE LOG:");
+    b.log_writer().print();
+
+    let log_lines = &b.log_writer().log_datas;
+    assert!(log_lines[0].0.starts_with("player[player1]") && log_lines[0].1.starts_with("spawn"));
+    assert!(log_lines[1].0.starts_with("player[player2]") && log_lines[1].1.starts_with("spawn"));
+    assert!(log_lines[2].0.starts_with("player[player3]") && log_lines[2].1.starts_with("spawn"));
+    assert!(log_lines[3].0.starts_with("player[player4]") && log_lines[3].1.starts_with("spawn"));
+
+    // order must be in player order
+    assert!(log_lines[4].1.starts_with("-move-forward(0)"));
+    assert!(log_lines[5].1.starts_with("-turn-cw(1)"));
+    assert!(log_lines[6].1.starts_with("-turn-ccw(2)"));
+    assert!(log_lines[7].1.starts_with("-shoot(3)"));
 }
