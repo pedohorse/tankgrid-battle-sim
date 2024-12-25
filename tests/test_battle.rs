@@ -544,7 +544,7 @@ fn test_rand() {
                 print(r1, r2, r3, r4, r5)\n\
                 "
                 .to_owned()
-                    + if i == 2 { "pass\n" } else { "" },  // program for 3rd sim has different text - so should do different rand
+                    + if i == 2 { "pass\n" } else { "" }, // program for 3rd sim has different text - so should do different rand
             )],
             logger,
         );
@@ -579,4 +579,66 @@ fn test_rand() {
     assert!(valss[0].iter().zip(valss[1].iter()).all(|(a, b)| *a == *b));
     // assert  sims with different programs yield different rand results
     assert!(valss[1].iter().zip(valss[2].iter()).all(|(a, b)| *a != *b));
+}
+
+#[test]
+fn test_2players_shoot_win_stop() {
+    let map = GridBattleMap::new(3, 3, SimpleTileType::Nothin, SimpleTileType::Nothin);
+    let logger = VecLogWriter::new();
+    let mut b = GridBattle::new(
+        SimpleBattleLogic::new(
+            map,
+            TestTrivialLogic {},
+            GridMapProber {},
+            SimpleBattleObjectLayer::new(),
+            FnCommandTimer::new(|com| match com {
+                PlayerCommand::TurnCW => 10,
+                PlayerCommand::MoveFwd => 20,
+                PlayerCommand::Shoot => 5,
+                PlayerCommand::Print(_) => 0,
+                _ => 10,
+            }),
+            1,
+        ),
+        vec![
+            (
+                new_player(1, 1, GridOrientation::West, 1, 1, "player1"),
+                "\
+while True:\n
+    move_forward()\n
+\n\
+                "
+                .to_owned(),
+            ),
+            (
+                new_player(5, 1, GridOrientation::West, 1, 1, "player2"),
+                "\
+while True:\n
+    shoot()\n
+\n\
+                "
+                .to_owned(),
+            ),
+        ],
+        logger,
+    );
+    b.run_simulation();
+    println!("BATTLE LOG:");
+    b.log_writer().print();
+
+    assert!(b.is_player_dead(0));
+    assert!(!b.is_player_dead(1));
+
+    let log_lines = &b.log_writer().log_datas;
+    assert!(8 == log_lines.len());
+    assert!(log_lines[0].1.starts_with("spawn"));
+    assert!(log_lines[1].1.starts_with("spawn"));
+    assert!(
+        log_lines[2].1.starts_with("-move-forward") && log_lines[3].1.starts_with("-shoot")
+            || log_lines[3].1.starts_with("-move-forward") && log_lines[2].1.starts_with("-shoot")
+    );
+    assert!(log_lines[4].1.starts_with("shoot"));
+    assert!(log_lines[5].1.starts_with("+shoot"));
+    assert!(log_lines[6].1.starts_with("die"));
+    assert!(log_lines[7].1.starts_with("win"));
 }
