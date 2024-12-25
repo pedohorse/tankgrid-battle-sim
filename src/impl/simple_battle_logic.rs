@@ -38,6 +38,7 @@ pub enum PlayerCommand<R> {
     CheckHit, // checks from which side was last hit (hit info is reset after check)
     ResetHit, // forcefully ignore last hit info. supposed to be faster than CheckHit
     Look(R),
+    Listen,
     AddAmmo(u64),   // generated after picking up ammo crate
     AddHealth(u64), // generated after picking up health
 }
@@ -54,6 +55,7 @@ where
             PlayerCommand::Shoot => "shoot".to_owned(),
             PlayerCommand::Wait => "wait".to_owned(),
             PlayerCommand::Look(dir) => format!("look[{}]", dir.log_repr()),
+            PlayerCommand::Listen => format!("listen"),
             PlayerCommand::AddAmmo(ammo) => format!("add-ammo[{}]", ammo),
             PlayerCommand::AddHealth(health) => format!("heal[{}]", health),
             PlayerCommand::CheckAmmo => format!("check-ammo"),
@@ -73,6 +75,7 @@ pub enum PlayerCommandReply<R> {
     Int(i64),
     HitDirection(Option<R>),
     LookResult(Vec<(String, Option<String>)>),
+    ListenResult(Vec<String>),
 }
 
 impl<R> CommandReplyStat for PlayerCommandReply<R> {
@@ -378,6 +381,46 @@ where
 
                 (PlayerCommandReply::LookResult(look_result), None)
             }
+            PlayerCommand::Listen => {
+                let mut res = Vec::with_capacity(player_states.len());
+                let player_state = &player_states[player_i];
+                let my_ori = player_state.orientation();
+                let my_pos = player_state.position();
+                for (i, enemy_state) in player_states.iter().enumerate() {
+                    if i == player_i {
+                        continue;
+                    }
+                    let (to_enemy1, to_enemy2_maybe) =
+                        R::direction_to_closest_orientations(my_pos, enemy_state.position());
+                    // fucky logic here is to properly assign values to border values
+                    let location = if let Some(to_enemy2) = to_enemy2_maybe {
+                        // meaning we don't have an exact orientation
+                        // NOTE: this logic does not really work for strange, non-uniform and axis-assymetrical kinds of rotation groups!
+                        let left = (to_enemy1.same_as(&my_ori) || to_enemy1.opposite_of(&my_ori)) && to_enemy2.left_of(&my_ori) || !to_enemy1.opposite_of(&my_ori) && to_enemy1.left_of(&my_ori);
+                        let front = to_enemy1.codirected_with(&my_ori) || !to_enemy1.counterdirected_with(&my_ori) && to_enemy2.codirected_with(&my_ori);
+                        match (front, left) {
+                            (false, false) => "back-right",
+                            (false, true) => "back-left",
+                            (true, false) => "front-right",
+                            (true, true) => "front-left",
+                        }
+                    } else {
+                        // meaning we DO have an exact match
+                        if to_enemy1.same_as(&my_ori) || to_enemy1.codirected_with(&my_ori) && to_enemy1.right_of(&my_ori) {
+                            "front-right"
+                        } else if to_enemy1.opposite_of(&my_ori) || to_enemy1.counterdirected_with(&my_ori) && to_enemy1.left_of(&my_ori) {
+                            "back-left"
+                        } else if to_enemy1.right_of(&my_ori) {
+                            "back-right"
+                        } else {
+                            "front-left"
+                        }
+                    };
+
+                    res.push(location.to_owned());
+                }
+                (PlayerCommandReply::ListenResult(res), None)
+            }
             PlayerCommand::AddAmmo(ammo) => {
                 let player_state = &mut player_states[player_i];
                 player_state.gain_resource(AMMO_RES, *ammo);
@@ -564,6 +607,29 @@ where
                     )
                 } else {
                     PyResult::Err(vm.new_runtime_error(format!("unexpected look reply: {:?}", ret)))
+                }
+            }
+        });
+        add_function!("listen", {
+            let comm_chan = comm_chan.clone();
+            move |vm: &VirtualMachine| {
+                println!("TEST: listen");
+                let ret = if let Ok(x) = comm_chan(PlayerCommand::Listen) {
+                    x
+                } else {
+                    return PyResult::Err(vm.new_runtime_error("game closed".to_owned()));
+                };
+                if let PlayerCommandReply::ListenResult(listen_result) = ret {
+                    PyResult::Ok(
+                        listen_result
+                            .into_iter()
+                            .map(|t| t.to_pyobject(&vm))
+                            .collect::<Vec<_>>(),
+                    )
+                } else {
+                    PyResult::Err(
+                        vm.new_runtime_error(format!("unexpected listen reply: {:?}", ret)),
+                    )
                 }
             }
         });
