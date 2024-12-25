@@ -1,6 +1,6 @@
 use battle_sim::map::MapWriteAccess;
 use battle_sim::object_layer::ObjectLayer;
-use battle_sim::r#impl::grid_battle::{GridBattle, GridPlayerState, new_player};
+use battle_sim::r#impl::grid_battle::{new_player, GridBattle, GridPlayerState};
 use battle_sim::r#impl::grid_map::GridBattleMap;
 use battle_sim::r#impl::grid_map_prober::GridMapProber;
 use battle_sim::r#impl::grid_orientation::GridOrientation;
@@ -264,4 +264,80 @@ if start_ammo == 2 and end_ammo == 1:\n
             assert_eq!(7, b.player_state(1).row);
         },
     );
+}
+
+#[test]
+fn test_hear() {
+    for ((x, y), ori2, res) in [
+        ((25, 2), GridOrientation::North, "front-right"),
+        ((24, 1), GridOrientation::North, "front-right"),
+        ((26, 10), GridOrientation::North, "back-right"),
+        ((25, 5), GridOrientation::North, "back-right"),
+        ((22, 6), GridOrientation::North, "back-left"),
+        ((24, 9), GridOrientation::North, "back-left"),
+        ((20, -4), GridOrientation::North, "front-left"),
+        ((23, 5), GridOrientation::North, "front-left"),
+
+        ((26, 8), GridOrientation::East, "front-right"),
+        ((27, 5), GridOrientation::East, "front-right"),
+        ((22, 6), GridOrientation::East, "back-right"),
+        ((24, 9), GridOrientation::East, "back-right"),
+        ((21, 4), GridOrientation::East, "back-left"),
+        ((13, 5), GridOrientation::East, "back-left"),
+        ((27, 2), GridOrientation::East, "front-left"),
+        ((24, 1), GridOrientation::East, "front-left"),
+
+        ((23, 8), GridOrientation::South, "front-right"),
+        ((24, 9), GridOrientation::South, "front-right"),
+        ((21, 1), GridOrientation::South, "back-right"),
+        ((22, 5), GridOrientation::South, "back-right"),
+        ((35, 1), GridOrientation::South, "back-left"),
+        ((24, -1), GridOrientation::South, "back-left"),
+        ((30, 8), GridOrientation::South, "front-left"),
+        ((25, 5), GridOrientation::South, "front-left"),
+
+        ((21, 2), GridOrientation::West, "front-right"),
+        ((19, 5), GridOrientation::West, "front-right"),
+        ((28, 3), GridOrientation::West, "back-right"),
+        ((24, 0), GridOrientation::West, "back-right"),
+        ((32, 11), GridOrientation::West, "back-left"),
+        ((33, 5), GridOrientation::West, "back-left"),
+        ((17, 11), GridOrientation::West, "front-left"),
+        ((24, 15), GridOrientation::West, "front-left"),
+    ] {
+        test_base(
+            vec![
+                (
+                    new_player(x, y, GridOrientation::East, 0, 1, "player1"),
+                    "\
+wait()\n
+                "
+                    .to_owned(),
+                ),
+                (
+                    new_player(24, 5, ori2, 0, 1, "player2"),
+                    format!(
+                        "\
+res = listen()\n
+assert(len(res) == 1)\n
+print(res)\n
+if res[0] == '{}':\n
+    move_forward()\n
+                ",
+                        res
+                    ),
+                ),
+            ],
+            |b| {
+                let fwd = match ori2 {
+                    GridOrientation::North => (24, 4),
+                    GridOrientation::East => (25, 5),
+                    GridOrientation::South => (24, 6),
+                    GridOrientation::West => (23, 5),
+                };
+                assert_eq!(fwd.0, b.player_state(1).col);
+                assert_eq!(fwd.1, b.player_state(1).row);
+            },
+        );
+    }
 }
