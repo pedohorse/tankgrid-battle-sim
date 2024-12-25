@@ -29,6 +29,8 @@ use rustpython_vm::{
 #[derive(Clone, Copy, PartialEq)]
 pub enum PlayerCommandState<PC> {
     None,
+    GotCommandQueued(PC, bool, GameTime, GameTime),
+    // command, need_to_reply, time_at, duration, command_id or not if not yet logged
     GotCommand(PC, bool, GameTime, GameTime, usize),
     Finish,
 }
@@ -214,7 +216,9 @@ where
                     for next_command in next_commands.iter_mut() {
                         // just finalize all players
                         // this will force their stopping and loop safe exit
-                        if let PlayerCommandState::GotCommand(_, _, _, _, _) = next_command {
+                        if let PlayerCommandState::GotCommand(_, _, _, _, _)
+                        | PlayerCommandState::GotCommandQueued(_, _, _, _) = next_command
+                        {
                             // we should let pending commands finalize
                         } else {
                             *next_command = PlayerCommandState::Finish;
@@ -239,51 +243,45 @@ where
                         players_that_have_commands += 1;
                         continue;
                     }
-                    if let PlayerCommandState::GotCommand(_, _, _, _, _) = next_commands[i] {
+                    if let PlayerCommandState::GotCommand(_, _, _, _, _)
+                    | PlayerCommandState::GotCommandQueued(_, _, _, _) = next_commands[i]
+                    {
                         players_that_have_commands += 1;
                         continue;
                     }
 
                     // first check if there are extra commands queues
                     if extra_commands_queue.len() > 0 {
-                        let command_id = self.next_command_id;
-                        self.next_command_id += 1;
+                        //let command_id = self.next_command_id;
+                        //self.next_command_id += 1;
                         let com = extra_commands_queue.pop_front().unwrap();
                         let duration = self
                             .battle_logic
                             .get_command_duration(&self.player_states[i], &com);
-                        // note, this log is same as below. TODO: can merge?
-                        self.log_writer.add_log_data(
-                            self.player_states[i].log_repr(),
-                            format!("-{}({})", com.log_repr(), command_id),
-                            self.time,
-                            duration,
-                        );
-                        next_commands[i] = PlayerCommandState::GotCommand(
-                            com, false, self.time, duration, command_id,
-                        );
+                        // // note, this log is same as below. TODO: can merge?
+                        // self.log_writer.add_log_data(
+                        //     self.player_states[i].log_repr(),
+                        //     format!("-{}({})", com.log_repr(), command_id),
+                        //     self.time,
+                        //     duration,
+                        // );
+                        next_commands[i] =
+                            PlayerCommandState::GotCommandQueued(com, false, self.time, duration);
                         players_that_have_commands += 1;
                         continue;
                     }
                     // then get new command from the program
                     match command_receiver.try_recv() {
                         Ok(com) => {
-                            let command_id = self.next_command_id;
-                            self.next_command_id += 1;
+                            //let command_id = self.next_command_id;
+                            //self.next_command_id += 1;
                             let player_state = &self.player_states[i];
                             let duration = self
                                 .battle_logic
                                 .get_command_duration(&self.player_states[i], &com);
 
-                            // note - operation logged here MAY not complete, depending on concrete game logic
-                            self.log_writer.add_log_data(
-                                player_state.log_repr(),
-                                format!("-{}({})", com.log_repr(), command_id),
-                                self.time,
-                                duration,
-                            );
-                            next_commands[i] = PlayerCommandState::GotCommand(
-                                com, true, self.time, duration, command_id,
+                            next_commands[i] = PlayerCommandState::GotCommandQueued(
+                                com, true, self.time, duration,
                             );
                             players_that_have_commands += 1;
                             continue;
@@ -357,6 +355,45 @@ where
                         break;
                     }
 
+                    // LOG command start and ASSIGN COMMAND IDs
+                    // we do it separately to ensure consistent ordering
+                    for (command, player_state) in
+                        next_commands.iter_mut().zip(self.player_states.iter())
+                    {
+                        // note - operation logged here MAY not complete, depending on concrete game logic
+                        if let PlayerCommandState::GotCommandQueued(_, _, _, _) = command {
+                            // this is an ugly way of moving only on match
+                            // TODO: if you find a nicer way of doing this - change accordingly
+                            let taken_command = command.take();
+                            if let PlayerCommandState::GotCommandQueued(
+                                com,
+                                need_to_reply,
+                                time,
+                                duration,
+                            ) = taken_command
+                            {
+                                let command_id = self.next_command_id;
+                                self.next_command_id += 1;
+                                self.log_writer.add_log_data(
+                                    player_state.log_repr(),
+                                    format!("-{}({})", com.log_repr(), command_id),
+                                    time,
+                                    duration,
+                                );
+                                *command = PlayerCommandState::GotCommand(
+                                    com,
+                                    need_to_reply,
+                                    time,
+                                    duration,
+                                    command_id,
+                                );
+                            } else {
+                                unreachable!();
+                            }
+                        }
+                    }
+                    // at this point all GetCommandQueued are changed to GetCommand
+
                     // if not done - select command to execute and advance time
                     if let Some((remaining_duration, player_i, next_command)) = next_commands
                         .iter_mut()
@@ -426,7 +463,7 @@ where
                                 "{}{}({})",
                                 if command_succeeded { "+" } else { "!" },
                                 com.log_repr(),
-                                command_id,
+                                command_id, // at this point command_id is guaranteed not to be None
                             ),
                             self.time,
                             0,
