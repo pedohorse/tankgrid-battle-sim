@@ -234,6 +234,11 @@ where
                         players_that_have_commands += 1;
                         continue;
                     };
+                    // ignore finished ones. If their channels are not closed yet - without this check they might get a new command.
+                    if let PlayerCommandState::Finish = next_commands[i] {
+                        players_that_have_commands += 1;
+                        continue;
+                    }
                     if let PlayerCommandState::GotCommand(_, _, _, _, _) = next_commands[i] {
                         players_that_have_commands += 1;
                         continue;
