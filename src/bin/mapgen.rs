@@ -1,4 +1,3 @@
-use battle_sim::r#impl::grid_battle::GridBattle;
 use battle_sim::r#impl::grid_map::GridBattleMap;
 use battle_sim::r#impl::tile_types::TileType;
 use battle_sim::map::MapWriteAccess;
