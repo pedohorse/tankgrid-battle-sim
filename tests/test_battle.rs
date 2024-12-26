@@ -472,17 +472,17 @@ fn test_print_limit() {
     assert_eq!(10 + 4 * 7 + 4 * 7, b.time());
     assert_eq!(GridOrientation::West, b.player_state(0).orientation);
 
-    assert_eq!("log[line1]", &b.log_writer().log_datas[2].1);
+    assert_eq!("log[line1]", &b.log_writer().log_datas[1].1);
     assert_eq!(
         "log[line3 _next line should not be allowed__foo!]",
-        &b.log_writer().log_datas[8].1
+        &b.log_writer().log_datas[3].1
     );
     assert_eq!(
         MAX_LOG_LINE_LENGTH + "log[]".len(),
-        b.log_writer().log_datas[5].1.len()
+        b.log_writer().log_datas[2].1.len()
     ); // check truncation
-    assert_eq!("log[---next print will be muted and penalized with game time unless a valid game comand called---]", &b.log_writer().log_datas[17].1);
-    assert_eq!(60, b.log_writer().log_datas.len());
+    assert_eq!("log[---next print will be muted and penalized with game time unless a valid game comand called---]", &b.log_writer().log_datas[6].1);
+    assert_eq!(32, b.log_writer().log_datas.len());
 }
 
 #[test]
@@ -515,7 +515,7 @@ fn test_print_convert() {
     b.log_writer().print();
 
     assert_eq!(0, b.time());
-    assert_eq!("log[foo 1 3.3]", &b.log_writer().log_datas[2].1);
+    assert_eq!("log[foo 1 3.3]", &b.log_writer().log_datas[1].1);
 }
 
 #[test]
@@ -566,8 +566,8 @@ fn test_rand() {
 
     let mut valss = Vec::with_capacity(3);
     for b in bs {
-        let line_len = b.log_writer().log_datas[2].1.len();
-        let vals: Vec<f64> = b.log_writer().log_datas[2].1[4..line_len - 1]
+        let line_len = b.log_writer().log_datas[1].1.len();
+        let vals: Vec<f64> = b.log_writer().log_datas[1].1[4..line_len - 1]
             .split(' ')
             .map(|x| -> f64 { x.parse().unwrap() })
             .collect();
@@ -645,7 +645,6 @@ while True:\n
     assert!(log_lines[7].1.starts_with("+shoot"));
 }
 
-
 #[test]
 fn test_4players_log_order() {
     let map = GridBattleMap::new(3, 3, SimpleTileType::Nothin, SimpleTileType::Nothin);
@@ -720,4 +719,55 @@ fn test_4players_log_order() {
     assert!(log_lines[5].1.starts_with("-turn-cw(1)"));
     assert!(log_lines[6].1.starts_with("-turn-ccw(2)"));
     assert!(log_lines[7].1.starts_with("-shoot(3)"));
+}
+
+#[test]
+fn test_time_command() {
+    let map = GridBattleMap::new(2, 2, SimpleTileType::Nothin, SimpleTileType::Nothin);
+    let logger = VecLogWriter::new();
+    let mut b = GridBattle::new(
+        SimpleBattleLogic::new(
+            map,
+            TestTrivialLogic {},
+            GridMapProber {},
+            SimpleBattleObjectLayer::new(),
+            FnCommandTimer::new(|com| match com {
+                PlayerCommand::MoveFwd => 3,
+                PlayerCommand::TurnCW => 170,
+                PlayerCommand::TurnCCW => 51000,
+                PlayerCommand::Time => 0,
+                PlayerCommand::Print(_) => 0,
+                _ => 10,
+            }),
+            0,
+        ),
+        vec![(
+            new_player(0, 0, GridOrientation::South, 0, 1, "player1"),
+            "\
+all = 0\n
+all += time()\n
+all += time()\n
+all += time()\n
+all += time()\n
+move_forward()\n
+all += time() # 3\n
+all += time() # 6\n
+turn_cw()\n
+turn_ccw()\n
+all += time() # 6 + 51173\n
+\n
+print(all)
+if all == 51179:\n
+    move_forward()\n
+            "
+            .to_owned(),
+        )],
+        logger,
+    );
+    b.run_simulation();
+    println!("BATTLE LOG:");
+    b.log_writer().print();
+    assert_eq!(51176, b.time());
+    assert_eq!(0, b.player_state(0).position().0);
+    assert_eq!(2, b.player_state(0).position().1);
 }
