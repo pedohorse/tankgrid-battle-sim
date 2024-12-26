@@ -8,10 +8,12 @@ use std::thread;
 use std::time::{self, Duration, Instant};
 use std::{cell::RefCell, rc::Rc, sync::mpsc};
 
+use crate::battle_state_info::BattleStateInfo;
+
 use super::battle_logic::BattleLogic;
 use super::command_and_reply::CommandReplyStat;
 use super::gametime::GameTime;
-use super::log_data::{LogRepresentable, LogWriter};
+use super::log_data::{LogRepresentable, LogWriter, MaybeLogRepresentable};
 
 use super::player_state::PlayerControl;
 use super::script_repr::ToScriptRepr;
@@ -53,7 +55,7 @@ impl<PC, PR> PlayerCommandState<PC, PR> {
 pub struct Battle<P, BLogic, PCom, PComRep, LW>
 where
     P: PlayerControl + LogRepresentable,
-    PCom: LogRepresentable,
+    PCom: MaybeLogRepresentable,
     BLogic: BattleLogic<P, PCom, PComRep, String, String>,
     LW: LogWriter<String, String>,
 {
@@ -74,7 +76,7 @@ impl<P, BLogic, PCom, PComRep, LW> Battle<P, BLogic, PCom, PComRep, LW>
 where
     P: PlayerControl + ToScriptRepr + LogRepresentable,
     BLogic: BattleLogic<P, PCom, PComRep, String, String>,
-    PCom: LogRepresentable + Hash + Clone + PartialEq + Eq + Send + 'static,
+    PCom: MaybeLogRepresentable + Hash + Clone + PartialEq + Eq + Send + 'static,
     PComRep: CommandReplyStat + Clone + PartialEq + Send + 'static,
     LW: LogWriter<String, String>,
 {
@@ -97,7 +99,7 @@ where
         }
     }
 
-    pub fn time(&self) -> usize {
+    pub fn time(&self) -> u64 {
         self.time
     }
 
@@ -345,19 +347,20 @@ where
                                 let command_id = self.next_command_id;
                                 self.next_command_id += 1;
 
-                                let duration = self
-                                    .battle_logic
-                                    .get_command_duration(player_state, &com);
+                                let duration =
+                                    self.battle_logic.get_command_duration(player_state, &com);
                                 let reply_delay_duration = self
                                     .battle_logic
                                     .get_command_reply_delay(player_state, &com);
 
-                                self.log_writer.add_log_data(
-                                    player_state.log_repr(),
-                                    format!("-{}({})", com.log_repr(), command_id),
-                                    time,
-                                    duration + reply_delay_duration,  // log full command time
-                                );
+                                if let Some(log_repr) = com.try_log_repr() {
+                                    self.log_writer.add_log_data(
+                                        player_state.log_repr(),
+                                        format!("-{}({})", log_repr, command_id),
+                                        time,
+                                        duration + reply_delay_duration, // log full command time
+                                    );
+                                }
 
                                 *command = PlayerCommandState::GotCommand(
                                     com,
@@ -415,11 +418,14 @@ where
                                 reply_delay_duration,
                                 command_id,
                             ) => {
+                                let battle_state = BattleStateInfo::new(self.time);
+
                                 let (reply, extra_actions_maybe) =
                                     self.battle_logic.process_commands(
                                         player_i,
                                         &com,
                                         &mut self.player_states,
+                                        &battle_state,
                                         &mut |obj, act| {
                                             self.log_writer.add_log_data(obj, act, self.time, 0);
                                         },
@@ -463,17 +469,19 @@ where
                                 start_timestamps[player_i] = Instant::now(); // update timeout counter
 
                                 // log operation finish
-                                self.log_writer.add_log_data(
-                                    self.player_states[player_i].log_repr(),
-                                    format!(
-                                        "{}{}({})",
-                                        if command_succeeded { "+" } else { "!" },
-                                        com.log_repr(),
-                                        command_id, // at this point command_id is guaranteed not to be None
-                                    ),
-                                    self.time,
-                                    0,
-                                );
+                                if let Some(log_repr) = com.try_log_repr() {
+                                    self.log_writer.add_log_data(
+                                        self.player_states[player_i].log_repr(),
+                                        format!(
+                                            "{}{}({})",
+                                            if command_succeeded { "+" } else { "!" },
+                                            log_repr,
+                                            command_id, // at this point command_id is guaranteed not to be None
+                                        ),
+                                        self.time,
+                                        0,
+                                    );
+                                }
                             }
                             _ => unreachable!(),
                         }

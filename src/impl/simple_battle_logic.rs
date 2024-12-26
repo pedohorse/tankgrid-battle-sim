@@ -1,7 +1,8 @@
 use crate::battle_logic::BattleLogic;
+use crate::battle_state_info::BattleStateInfo;
 use crate::command_and_reply::CommandReplyStat;
 use crate::gametime::GameTime;
-use crate::log_data::LogRepresentable;
+use crate::log_data::{LogRepresentable, MaybeLogRepresentable};
 use crate::map::MapReadAccess;
 use crate::map_object::MapObject;
 use crate::map_prober::MapProber;
@@ -41,28 +42,30 @@ pub enum PlayerCommand<R> {
     Listen,
     AddAmmo(u64),   // generated after picking up ammo crate
     AddHealth(u64), // generated after picking up health
+    Time,
 }
 
-impl<R> LogRepresentable for PlayerCommand<R>
+impl<R> MaybeLogRepresentable for PlayerCommand<R>
 where
     R: LogRepresentable,
 {
-    fn log_repr(&self) -> String {
+    fn try_log_repr(&self) -> Option<String> {
         match self {
-            PlayerCommand::MoveFwd => "move-forward".to_owned(),
-            PlayerCommand::TurnCW => "turn-cw".to_owned(),
-            PlayerCommand::TurnCCW => "turn-ccw".to_owned(),
-            PlayerCommand::Shoot => "shoot".to_owned(),
-            PlayerCommand::Wait => "wait".to_owned(),
-            PlayerCommand::Look(dir) => format!("look[{}]", dir.log_repr()),
-            PlayerCommand::Listen => format!("listen"),
-            PlayerCommand::AddAmmo(ammo) => format!("add-ammo[{}]", ammo),
-            PlayerCommand::AddHealth(health) => format!("heal[{}]", health),
-            PlayerCommand::CheckAmmo => format!("check-ammo"),
-            PlayerCommand::CheckHealth => format!("check-health"),
-            PlayerCommand::CheckHit => format!("check-hit"),
-            PlayerCommand::ResetHit => format!("reset-hit"),
-            PlayerCommand::Print(_) => format!("log-print"), // just log command, not the contents
+            PlayerCommand::MoveFwd => Some("move-forward".to_owned()),
+            PlayerCommand::TurnCW => Some("turn-cw".to_owned()),
+            PlayerCommand::TurnCCW => Some("turn-ccw".to_owned()),
+            PlayerCommand::Shoot => Some("shoot".to_owned()),
+            PlayerCommand::Wait => Some("wait".to_owned()),
+            PlayerCommand::Look(dir) => Some(format!("look[{}]", dir.log_repr())),
+            PlayerCommand::Listen => Some(format!("listen")),
+            PlayerCommand::AddAmmo(ammo) => Some(format!("add-ammo[{}]", ammo)),
+            PlayerCommand::AddHealth(health) => Some(format!("heal[{}]", health)),
+            PlayerCommand::CheckAmmo => Some(format!("check-ammo")),
+            PlayerCommand::CheckHealth => Some(format!("check-health")),
+            PlayerCommand::CheckHit => Some(format!("check-hit")),
+            PlayerCommand::ResetHit => Some(format!("reset-hit")),
+            PlayerCommand::Print(_) => None,
+            PlayerCommand::Time => None,
         }
     }
 }
@@ -73,6 +76,7 @@ pub enum PlayerCommandReply<R> {
     Ok,
     Bool(bool),
     Int(i64),
+    Uint(u64),
     HitDirection(Option<R>),
     LookResult(Vec<(String, Option<String>)>),
     ListenResult(Vec<String>),
@@ -198,6 +202,7 @@ where
         player_i: usize,
         com: &PlayerCommand<R>,
         player_states: &mut [P],
+        battle_state: &BattleStateInfo,
         logger: &mut LWF,
     ) -> (PlayerCommandReply<R>, Option<Vec<PlayerCommand<R>>>)
     where
@@ -476,6 +481,9 @@ where
                 player_state.expend_resource(PRINT_COUNTER_RES, 1);
                 (PlayerCommandReply::Ok, penalty)
             }
+            PlayerCommand::Time => {
+                (PlayerCommandReply::Uint(battle_state.game_time), None)
+            }
         }
     }
 
@@ -500,7 +508,7 @@ where
             speed_percentage
         };
 
-        (dur * 100) / (speed_percentage as usize)
+        (dur * 100) / (speed_percentage as u64)
     }
 
     fn get_command_reply_delay(&self, _player_state: &P, com: &PlayerCommand<R>) -> GameTime {
@@ -702,6 +710,24 @@ where
                 println!("TEST: reset_hit");
                 let _ret = comm_chan(PlayerCommand::ResetHit);
                 PyResult::Ok(())
+            }
+        });
+        add_function!("time", {
+            let comm_chan = comm_chan.clone();
+            move |vm: &VirtualMachine| {
+                println!("TEST: test");
+                let ret = if let Ok(x) = comm_chan(PlayerCommand::Time) {
+                    x
+                } else {
+                    return PyResult::Err(vm.new_runtime_error("game closed".to_owned()));
+                };
+                if let PlayerCommandReply::Uint(time) = ret {
+                    PyResult::Ok(time)
+                } else {
+                    PyResult::Err(
+                        vm.new_runtime_error(format!("unexpected time result: {:?}", ret)),
+                    )
+                }
             }
         });
     }

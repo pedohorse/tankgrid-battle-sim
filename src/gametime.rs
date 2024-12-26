@@ -1,1 +1,1 @@
-pub type GameTime = usize;
+pub type GameTime = u64;

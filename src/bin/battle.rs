@@ -42,6 +42,7 @@ impl CommandTimer<PlayerCommand<GridOrientation>> for CommandTimings {
             PlayerCommand::CheckHit => 2,
             PlayerCommand::ResetHit => 1,
             PlayerCommand::Print(_) => 0,
+            PlayerCommand::Time => 0,
         }
     }
     fn get_reply_delay(

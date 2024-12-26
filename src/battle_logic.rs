@@ -1,6 +1,7 @@
 use super::gametime::GameTime;
 use super::log_data::LogRepresentable;
 use super::player_state::PlayerControl;
+use super::battle_state_info::BattleStateInfo;
 
 use rustpython_vm::scope::Scope;
 use rustpython_vm::vm::VirtualMachine;
@@ -30,6 +31,7 @@ where
         player_i: usize,
         com: &PCom,
         player_states: &mut [P],
+        battle_info: &BattleStateInfo,
         logger: &mut LWF,
     ) -> (PComRep, Option<Vec<PCom>>)
     where
