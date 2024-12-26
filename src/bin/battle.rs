@@ -1,8 +1,8 @@
 use battle_sim::map::MapReadAccess;
 use battle_sim::maptile_logic::MaptileLogic;
-use battle_sim::object_layer::{self, ObjectLayer};
+use battle_sim::object_layer::ObjectLayer;
 use battle_sim::r#impl::buf_battle_logger::BufferLogWriter;
-use battle_sim::r#impl::grid_battle::{GridBattle, GridPlayerState, new_player};
+use battle_sim::r#impl::grid_battle::{new_player, GridBattle};
 use battle_sim::r#impl::grid_map::GridBattleMap;
 use battle_sim::r#impl::grid_map_prober::GridMapProber;
 use battle_sim::r#impl::grid_orientation::GridOrientation;
@@ -28,9 +28,9 @@ impl CommandTimer<PlayerCommand<GridOrientation>> for CommandTimings {
         command: &PlayerCommand<GridOrientation>,
     ) -> battle_sim::gametime::GameTime {
         match command {
-            PlayerCommand::MoveFwd => 10,
-            PlayerCommand::TurnCW => 15,
-            PlayerCommand::TurnCCW => 15,
+            PlayerCommand::MoveFwd => 5, // half, half after
+            PlayerCommand::TurnCW => 8,  // half, half after
+            PlayerCommand::TurnCCW => 8, // half, half after
             PlayerCommand::Shoot => 5,
             PlayerCommand::Look(_) => 4,
             PlayerCommand::Listen => 3,
@@ -42,6 +42,17 @@ impl CommandTimer<PlayerCommand<GridOrientation>> for CommandTimings {
             PlayerCommand::CheckHit => 2,
             PlayerCommand::ResetHit => 1,
             PlayerCommand::Print(_) => 0,
+        }
+    }
+    fn get_reply_delay(
+        &self,
+        command: &PlayerCommand<GridOrientation>,
+    ) -> battle_sim::gametime::GameTime {
+        match command {
+            PlayerCommand::MoveFwd => 5,
+            PlayerCommand::TurnCW => 8,
+            PlayerCommand::TurnCCW => 8,
+            _ => 0,
         }
     }
 }
@@ -119,11 +130,11 @@ fn main() -> ExitCode {
             return ExitCode::from(1);
         }
 
-        let name: &str = player_program_file.file_stem().map(|x| x.to_str().unwrap_or("player")).unwrap_or("player");
-        player_initial_data.push((
-            new_player(x, y, ori, 5, 5, name),
-            player_program,
-        ));
+        let name: &str = player_program_file
+            .file_stem()
+            .map(|x| x.to_str().unwrap_or("player"))
+            .unwrap_or("player");
+        player_initial_data.push((new_player(x, y, ori, 5, 5, name), player_program));
     }
 
     let mut object_layer = SimpleBattleObjectLayer::new();
