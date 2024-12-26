@@ -27,22 +27,23 @@ use rustpython_vm::{
 };
 
 #[derive(Clone, Copy, PartialEq)]
-pub enum PlayerCommandState<PC> {
+pub enum PlayerCommandState<PC, PR> {
     None,
-    GotCommandQueued(PC, bool, GameTime, GameTime),
-    // command, need_to_reply, time_at, duration, command_id or not if not yet logged
-    GotCommand(PC, bool, GameTime, GameTime, usize),
+    GotCommandQueued(PC, bool, GameTime),
+    // command, need_to_reply, time_at, duration, reply_duration, command_id or not if not yet logged
+    GotCommand(PC, bool, GameTime, GameTime, GameTime, usize),
+    GotCommandReply(PC, PR, bool, GameTime, GameTime, usize),
     Finish,
 }
 
-impl<PC> PlayerCommandState<PC> {
-    pub fn take(&mut self) -> PlayerCommandState<PC> {
+impl<PC, PR> PlayerCommandState<PC, PR> {
+    pub fn take(&mut self) -> PlayerCommandState<PC, PR> {
         mem::replace(self, PlayerCommandState::None)
     }
 
-    pub fn unwrap(self) -> (PC, bool, GameTime, GameTime, usize) {
-        if let PlayerCommandState::GotCommand(c, nr, t, dur, c_id) = self {
-            (c, nr, t, dur, c_id)
+    pub fn unwrap(self) -> (PC, bool, GameTime, GameTime, GameTime, usize) {
+        if let PlayerCommandState::GotCommand(c, nr, t, dur, rep_dur, c_id) = self {
+            (c, nr, t, dur, rep_dur, c_id)
         } else {
             panic!("unwrap failed!");
         }
@@ -74,7 +75,7 @@ where
     P: PlayerControl + ToScriptRepr + LogRepresentable,
     BLogic: BattleLogic<P, PCom, PComRep, String, String>,
     PCom: LogRepresentable + Hash + Clone + PartialEq + Eq + Send + 'static,
-    PComRep: CommandReplyStat + Send + 'static,
+    PComRep: CommandReplyStat + Clone + PartialEq + Send + 'static,
     LW: LogWriter<String, String>,
 {
     pub fn new(
@@ -160,7 +161,7 @@ where
                 }
             }
 
-            let mut next_commands: Vec<PlayerCommandState<PCom>> =
+            let mut next_commands: Vec<PlayerCommandState<PCom, PComRep>> =
                 vec![PlayerCommandState::None; player_count];
 
             // initial logic setup
@@ -216,13 +217,10 @@ where
                     for next_command in next_commands.iter_mut() {
                         // just finalize all players
                         // this will force their stopping and loop safe exit
-                        if let PlayerCommandState::GotCommand(_, _, _, _, _)
-                        | PlayerCommandState::GotCommandQueued(_, _, _, _) = next_command
-                        {
-                            // we should let pending commands finalize
-                        } else {
+                        if let PlayerCommandState::None = next_command {
                             *next_command = PlayerCommandState::Finish;
                         }
+                        // we should let pending commands finalize
                     }
                 }
 
@@ -238,51 +236,27 @@ where
                         players_that_have_commands += 1;
                         continue;
                     };
-                    // ignore finished ones. If their channels are not closed yet - without this check they might get a new command.
-                    if let PlayerCommandState::Finish = next_commands[i] {
-                        players_that_have_commands += 1;
-                        continue;
-                    }
-                    if let PlayerCommandState::GotCommand(_, _, _, _, _)
-                    | PlayerCommandState::GotCommandQueued(_, _, _, _) = next_commands[i]
-                    {
+                    // ignore finished ones and set ones. If their channels are not closed yet - without this check they might get a new command.
+                    if let PlayerCommandState::None = next_commands[i] {
+                    } else {
+                        // if next comman is anything BUT None
                         players_that_have_commands += 1;
                         continue;
                     }
 
                     // first check if there are extra commands queues
                     if extra_commands_queue.len() > 0 {
-                        //let command_id = self.next_command_id;
-                        //self.next_command_id += 1;
                         let com = extra_commands_queue.pop_front().unwrap();
-                        let duration = self
-                            .battle_logic
-                            .get_command_duration(&self.player_states[i], &com);
-                        // // note, this log is same as below. TODO: can merge?
-                        // self.log_writer.add_log_data(
-                        //     self.player_states[i].log_repr(),
-                        //     format!("-{}({})", com.log_repr(), command_id),
-                        //     self.time,
-                        //     duration,
-                        // );
                         next_commands[i] =
-                            PlayerCommandState::GotCommandQueued(com, false, self.time, duration);
+                            PlayerCommandState::GotCommandQueued(com, false, self.time);
                         players_that_have_commands += 1;
                         continue;
                     }
                     // then get new command from the program
                     match command_receiver.try_recv() {
                         Ok(com) => {
-                            //let command_id = self.next_command_id;
-                            //self.next_command_id += 1;
-                            let player_state = &self.player_states[i];
-                            let duration = self
-                                .battle_logic
-                                .get_command_duration(&self.player_states[i], &com);
-
-                            next_commands[i] = PlayerCommandState::GotCommandQueued(
-                                com, true, self.time, duration,
-                            );
+                            next_commands[i] =
+                                PlayerCommandState::GotCommandQueued(com, true, self.time);
                             players_that_have_commands += 1;
                             continue;
                         }
@@ -361,30 +335,36 @@ where
                         next_commands.iter_mut().zip(self.player_states.iter())
                     {
                         // note - operation logged here MAY not complete, depending on concrete game logic
-                        if let PlayerCommandState::GotCommandQueued(_, _, _, _) = command {
+                        if let PlayerCommandState::GotCommandQueued(_, _, _) = command {
                             // this is an ugly way of moving only on match
                             // TODO: if you find a nicer way of doing this - change accordingly
                             let taken_command = command.take();
-                            if let PlayerCommandState::GotCommandQueued(
-                                com,
-                                need_to_reply,
-                                time,
-                                duration,
-                            ) = taken_command
+                            if let PlayerCommandState::GotCommandQueued(com, need_to_reply, time) =
+                                taken_command
                             {
                                 let command_id = self.next_command_id;
                                 self.next_command_id += 1;
+
+                                let duration = self
+                                    .battle_logic
+                                    .get_command_duration(player_state, &com);
+                                let reply_delay_duration = self
+                                    .battle_logic
+                                    .get_command_reply_delay(player_state, &com);
+
                                 self.log_writer.add_log_data(
                                     player_state.log_repr(),
                                     format!("-{}({})", com.log_repr(), command_id),
                                     time,
-                                    duration,
+                                    duration + reply_delay_duration,  // log full command time
                                 );
+
                                 *command = PlayerCommandState::GotCommand(
                                     com,
                                     need_to_reply,
                                     time,
                                     duration,
+                                    reply_delay_duration,
                                     command_id,
                                 );
                             } else {
@@ -408,9 +388,11 @@ where
                         })
                         .map(|(player_i, k)| {
                             // calc remaining duration and other useful things
-                            let (_com, command_start_gametime, duration) =
-                                if let PlayerCommandState::GotCommand(x, _, y, dur, _) = k {
-                                    (x, y, *dur)
+                            let (command_start_gametime, duration) =
+                                if let PlayerCommandState::GotCommand(_, _, y, dur, _, _)
+                                | PlayerCommandState::GotCommandReply(_, _, _, y, dur, _) = k
+                                {
+                                    (y, *dur)
                                 } else {
                                     // filter above must have filtered Finish out, and None must not happen cuz of prev logic
                                     unreachable!();
@@ -420,54 +402,81 @@ where
                         })
                         .min_by_key(|k| k.0)
                     {
-                        // process the next command
-
-                        let (com, need_to_reply, _, _, command_id) = next_command.take().unwrap();
-
-                        // ONLY Finished command may have None for reply channel by design
-                        //  also we bravely unwrap cuz channels may close only in the start of the loop
-                        let reply_channel = &channels[player_i].as_ref().unwrap().1;
-
+                        // advance time first!
                         self.time += remaining_duration;
 
-                        let (reply, extra_actions_maybe) = self.battle_logic.process_commands(
-                            player_i,
-                            &com,
-                            &mut self.player_states,
-                            &mut |obj, act| {
-                                self.log_writer.add_log_data(obj, act, self.time, 0);
-                            },
-                        );
-                        if let Some(extra_actions) = extra_actions_maybe {
-                            player_extra_commands_queues[player_i].extend(extra_actions);
-                        }
+                        // process the next command
+                        match next_command.take() {
+                            PlayerCommandState::GotCommand(
+                                com,
+                                need_to_reply,
+                                _,
+                                _,
+                                reply_delay_duration,
+                                command_id,
+                            ) => {
+                                let (reply, extra_actions_maybe) =
+                                    self.battle_logic.process_commands(
+                                        player_i,
+                                        &com,
+                                        &mut self.player_states,
+                                        &mut |obj, act| {
+                                            self.log_writer.add_log_data(obj, act, self.time, 0);
+                                        },
+                                    );
+                                if let Some(extra_actions) = extra_actions_maybe {
+                                    player_extra_commands_queues[player_i].extend(extra_actions);
+                                }
 
-                        let command_succeeded = reply.command_succeeded();
-
-                        // send reply
-                        if need_to_reply {
-                            if let Err(_) = reply_channel.send(reply) {
-                                println!("failed to send reply to the player");
-                                // consider player broken
-                                *next_command = PlayerCommandState::Finish;
-                                continue;
+                                *next_command = PlayerCommandState::GotCommandReply(
+                                    com,
+                                    reply,
+                                    need_to_reply,
+                                    self.time,
+                                    reply_delay_duration,
+                                    command_id,
+                                )
                             }
+                            PlayerCommandState::GotCommandReply(
+                                com,
+                                reply,
+                                need_to_reply,
+                                _,
+                                _,
+                                command_id,
+                            ) => {
+                                // ONLY Finished command may have None for reply channel by design
+                                //  also we bravely unwrap cuz channels may close only in the start of the loop
+                                let reply_channel = &channels[player_i].as_ref().unwrap().1;
+
+                                let command_succeeded = reply.command_succeeded();
+                                // send reply
+                                if need_to_reply {
+                                    if let Err(_) = reply_channel.send(reply) {
+                                        println!("failed to send reply to the player");
+                                        // consider player broken
+                                        *next_command = PlayerCommandState::Finish;
+                                        continue;
+                                    }
+                                }
+
+                                start_timestamps[player_i] = Instant::now(); // update timeout counter
+
+                                // log operation finish
+                                self.log_writer.add_log_data(
+                                    self.player_states[player_i].log_repr(),
+                                    format!(
+                                        "{}{}({})",
+                                        if command_succeeded { "+" } else { "!" },
+                                        com.log_repr(),
+                                        command_id, // at this point command_id is guaranteed not to be None
+                                    ),
+                                    self.time,
+                                    0,
+                                );
+                            }
+                            _ => unreachable!(),
                         }
-
-                        start_timestamps[player_i] = Instant::now(); // update timeout counter
-
-                        // log operation finish
-                        self.log_writer.add_log_data(
-                            self.player_states[player_i].log_repr(),
-                            format!(
-                                "{}{}({})",
-                                if command_succeeded { "+" } else { "!" },
-                                com.log_repr(),
-                                command_id, // at this point command_id is guaranteed not to be None
-                            ),
-                            self.time,
-                            0,
-                        );
                     } else {
                         // no min - means all commands are Finish, but that must have been checked before, so
                         unreachable!("should not be reached");
