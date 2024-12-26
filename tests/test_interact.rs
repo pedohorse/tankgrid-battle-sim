@@ -46,9 +46,9 @@ where
             SimpleBattleObjectLayer::new(),
             HashmapCommandTimer::new(
                 HashMap::from([
-                    (PlayerCommand::TurnCW, 10),
-                    (PlayerCommand::TurnCCW, 10),
-                    (PlayerCommand::MoveFwd, 20),
+                    (PlayerCommand::TurnCW, 5),
+                    (PlayerCommand::TurnCCW, 5),
+                    (PlayerCommand::MoveFwd, 10),
                     (PlayerCommand::Look(GridOrientation::North), 5),
                     (PlayerCommand::Look(GridOrientation::East), 5),
                     (PlayerCommand::Look(GridOrientation::South), 5),
@@ -59,6 +59,12 @@ where
                     (PlayerCommand::CheckHealth, 2),
                     (PlayerCommand::CheckHit, 2),
                 ]),
+                HashMap::from([
+                    (PlayerCommand::TurnCW, 5),
+                    (PlayerCommand::TurnCCW, 5),
+                    (PlayerCommand::MoveFwd, 10),
+                ]),
+                0,
                 0,
             ),
             0,
@@ -340,4 +346,163 @@ if res[0] == '{}':\n
             },
         );
     }
+}
+
+
+#[test]
+fn test_move_timings1() {
+    // here we check hits, next one - misses
+    test_base(
+        vec![
+            (
+                new_player(20, 7, GridOrientation::South, 1, 10, "player1"),
+                "\
+check_ammo() # 2\n
+move_forward() # 10+10 =22\n
+if check_hit() == 'left': # 2 =24\n
+    move_forward() # 10+10 =44\n
+    for _ in range(30):\n
+        assert check_hit() == None # 30*2 =104\n
+    move_forward() # 10+10 = 124\n
+    if check_hit() == 'left' and check_health() == 8:\n
+        move_forward()\n
+            "
+                .to_owned(),
+            ),
+            (
+                new_player(30, 7, GridOrientation::West, 2, 1, "player2"),
+                "\
+shoot() # 10+15\n
+turn_ccw() # 5+5 =35\n
+move_forward() # 10+10 = 55\n
+move_forward() # 10+10 = 75\n
+move_forward() # 10+10 = 95\n
+turn_cw() # 5+5 =105\n
+shoot() # 10 =115\n
+            "
+                .to_owned(),
+            ),
+        ],
+        |b| {
+            assert_eq!(20, b.player_state(0).col);
+            assert_eq!(11, b.player_state(0).row);
+        },
+    );
+}
+
+
+#[test]
+fn test_move_timings2() {
+    // here we check misses, prev one - hits
+    test_base(
+        vec![
+            (
+                new_player(20, 7, GridOrientation::South, 1, 1, "player1"),
+                "\
+move_forward() # 10+10 =20\n
+if check_hit() == None: # 2 =22\n
+    move_forward() # 10+10 =42\n
+    for _ in range(33):\n
+        assert check_hit() == None # 33*2 =108\n
+    move_forward() # 10+10 =128\n
+    if check_hit() == None and check_health() == 1:\n
+        move_forward()\n
+            "
+                .to_owned(),
+            ),
+            (
+                new_player(30, 7, GridOrientation::West, 2, 1, "player2"),
+                "\
+check_ammo() # 2\n
+shoot() # 10+15 = 27\n
+turn_ccw() # 5+5 =37\n
+move_forward() # 10+10 = 57\n
+move_forward() # 10+10 = 77\n
+move_forward() # 10+10 = 97\n
+turn_cw() # 5+5 =107\n
+shoot() # 10 =117\n
+            "
+                .to_owned(),
+            ),
+        ],
+        |b| {
+            assert_eq!(20, b.player_state(0).col);
+            assert_eq!(11, b.player_state(0).row);
+        },
+    );
+}
+
+
+#[test]
+fn test_turn_cw_timings1() {
+    // here we check hits, next one - misses
+    test_base(
+        vec![
+            (
+                new_player(20, 7, GridOrientation::South, 1, 10, "player1"),
+                "\
+wait() # 5\n
+check_ammo() # 2 =7\n
+turn_cw() # 5+5 =17\n
+if check_hit() == 'left': # 2 =19\n
+    move_forward() # 10+10 =39\n
+    turn_cw() # 5+5 =49\n
+    if check_hit() == 'right' and check_health() == 8:\n
+        move_forward()\n
+            "
+                .to_owned(),
+            ),
+            (
+                new_player(30, 7, GridOrientation::West, 2, 1, "player2"),
+                "\
+shoot() # 10+15\n
+wait() # 5 =30\n
+wait() # 5 =35\n
+shoot() # 10 =45\n
+            "
+                .to_owned(),
+            ),
+        ],
+        |b| {
+            assert_eq!(19, b.player_state(0).col);
+            assert_eq!(6, b.player_state(0).row);
+        },
+    );
+}
+
+
+#[test]
+fn test_turn_cw_timings2() {
+    // here we check misses, prev one - hits
+    test_base(
+        vec![
+            (
+                new_player(20, 7, GridOrientation::South, 1, 10, "player1"),
+                "\
+check_ammo() # 2 =2\n
+check_ammo() # 2 =4\n
+turn_cw() # 5+5 =14\n
+if check_hit() == 'back': # 2 =16\n
+    move_forward() # 10+10 =36\n
+    turn_cw() # 5+5 =46\n
+    if check_hit() == 'back' and check_health() == 8:\n
+        move_forward()\n
+            "
+                .to_owned(),
+            ),
+            (
+                new_player(30, 7, GridOrientation::West, 2, 1, "player2"),
+                "\
+shoot() # 10+15\n
+wait() # 5 =30\n
+shoot() # 10 =40\n
+            "
+                .to_owned(),
+            ),
+        ],
+        |b| {
+            assert_eq!(19, b.player_state(0).col);
+            assert_eq!(6, b.player_state(0).row);
+        },
+    );
 }

@@ -128,7 +128,9 @@ impl MaptileLogic<SimpleTileType> for TestSimpleLogic {
 
 pub struct HashmapCommandTimer<PC> {
     durations: HashMap<PC, GameTime>,
+    reply_durations: HashMap<PC, GameTime>,
     default: GameTime,
+    default_reply_duration: GameTime,
 }
 
 pub struct FnCommandTimer<PC, F>
@@ -150,9 +152,17 @@ where
             self.default
         }
     }
+
+    fn get_reply_delay(&self, command: &PC) -> GameTime {
+        if let Some(val) = self.reply_durations.get(command) {
+            *val
+        } else {
+            self.default_reply_duration
+        }
+    }
 }
 
-impl<PC, F> CommandTimer<PC> for FnCommandTimer<PC, F> 
+impl<PC, F> CommandTimer<PC> for FnCommandTimer<PC, F>
 where
     F: Fn(&PC) -> GameTime,
 {
@@ -162,22 +172,29 @@ where
 }
 
 impl<PC> HashmapCommandTimer<PC> {
-    pub fn new(hashmap: HashMap<PC, GameTime>, default: GameTime) -> HashmapCommandTimer<PC> {
+    pub fn new(
+        hashmap: HashMap<PC, GameTime>,
+        reply_hashmap: HashMap<PC, GameTime>,
+        default: GameTime,
+        reply_default: GameTime,
+    ) -> HashmapCommandTimer<PC> {
         HashmapCommandTimer {
             durations: hashmap,
+            reply_durations: reply_hashmap,
             default,
+            default_reply_duration: reply_default,
         }
     }
 }
 
-impl<PC, F>  FnCommandTimer<PC, F> 
+impl<PC, F> FnCommandTimer<PC, F>
 where
     F: Fn(&PC) -> GameTime,
 {
     pub fn new(mapper: F) -> FnCommandTimer<PC, F> {
         FnCommandTimer {
             fnfn: mapper,
-            _marker: PhantomData{},
+            _marker: PhantomData {},
         }
     }
 }

@@ -152,7 +152,9 @@ fn test_2players_move_into_each_other() {
                     (PlayerCommand::TurnCW, 10),
                     (PlayerCommand::MoveFwd, 20),
                 ]),
+                HashMap::new(),
                 10,
+                0,
             ),
             0,
         ),
@@ -211,7 +213,9 @@ fn test_2players_move_past_each_other() {
                     (PlayerCommand::TurnCW, 10),
                     (PlayerCommand::MoveFwd, 20),
                 ]),
+                HashMap::new(),
                 10,
+                0,
             ),
             0,
         ),
@@ -636,9 +640,9 @@ while True:\n
     assert!(log_lines[2].1.starts_with("-move-forward"));
     assert!(log_lines[3].1.starts_with("-shoot"));
     assert!(log_lines[4].1.starts_with("shoot"));
-    assert!(log_lines[5].1.starts_with("+shoot"));
-    assert!(log_lines[6].1.starts_with("die"));
-    assert!(log_lines[7].1.starts_with("win"));
+    assert!(log_lines[5].1.starts_with("die"));
+    assert!(log_lines[6].1.starts_with("win"));
+    assert!(log_lines[7].1.starts_with("+shoot"));
 }
 
 
