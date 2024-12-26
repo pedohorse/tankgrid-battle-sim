@@ -1,5 +1,5 @@
 use super::gametime::GameTime;
-use super::log_data::{LogRepresentable, LogWriter};
+use super::log_data::LogRepresentable;
 use super::player_state::PlayerControl;
 
 use rustpython_vm::scope::Scope;
@@ -21,6 +21,8 @@ where
     where
         LWF: FnMut(LO, LA),
     {
+        let _ = player_states; // avoid unused var warning
+        let _ = logger; // avoid unused var warning
     }
 
     fn process_commands<LWF>(
@@ -34,6 +36,7 @@ where
         LWF: FnMut(LO, LA);
 
     fn get_command_duration(&self, player_state: &P, com: &PCom) -> GameTime;
+    fn get_command_reply_delay(&self, player_state: &P, com: &PCom) -> GameTime;
 
     fn initialize_scope<FSR>(vm: &VirtualMachine, scope: &Scope, comm_chan: FSR)
     where
