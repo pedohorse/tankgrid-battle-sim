@@ -67,7 +67,7 @@ where
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub enum PlayerCommandReply<R> {
     Failed,
     Ok,
@@ -90,6 +90,11 @@ impl<R> CommandReplyStat for PlayerCommandReply<R> {
 
 pub trait CommandTimer<PC> {
     fn get_base_duration(&self, command: &PC) -> GameTime;
+
+    fn get_reply_delay(&self, command: &PC) -> GameTime {
+        let _ = command; // avoid unused warning
+        0
+    }
 }
 
 pub struct SimpleBattleLogic<T, M, L, Pr, R, OLayer, Fdur>
@@ -496,6 +501,10 @@ where
         };
 
         (dur * 100) / (speed_percentage as usize)
+    }
+
+    fn get_command_reply_delay(&self, _player_state: &P, com: &PlayerCommand<R>) -> GameTime {
+        self.command_duration.get_reply_delay(com)
     }
 
     fn initialize_scope<FSR>(vm: &VirtualMachine, scope: &Scope, comm_chan: FSR)
