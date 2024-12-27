@@ -1,4 +1,5 @@
 pub trait SimpleOrientation: Sized {
+    fn dot(&self, other: &Self) -> f64;
     fn same_as(&self, other: &Self) -> bool;
     fn opposite_of(&self, other: &Self) -> bool;
     /// opposite direction (if such exists) should count as both left_of and right_of
@@ -7,8 +8,12 @@ pub trait SimpleOrientation: Sized {
     fn right_of(&self, other: &Self) -> bool;
 
     // orthogonal directions (if such exist) should return false in both cases
-    fn codirected_with(&self, other: &Self) -> bool;
-    fn counterdirected_with(&self, other: &Self) -> bool;
+    fn codirected_with(&self, other: &Self) -> bool {
+        self.dot(other) > 0.0
+    }
+    fn counterdirected_with(&self, other: &Self) -> bool {
+        self.dot(other) < 0.0
+    }
     
     fn turn_cw(&self) -> Self;
     fn turn_ccw(&self) -> Self;

@@ -153,14 +153,15 @@ impl SimpleOrientation for GridOrientation {
         }
     }
 
-    fn codirected_with(&self, other: &Self) -> bool {
-        return *self == *other
+    fn dot(&self, other: &Self) -> f64 {
+        if self.same_as(other) { return 1.0; }
+        if self.opposite_of(other) { return -1.0; }
+        match (self, other) {
+            (GridOrientation::North | GridOrientation::South, GridOrientation::East | GridOrientation::West) => 0.0,
+            (GridOrientation::East | GridOrientation::West, GridOrientation::North | GridOrientation::South) => 0.0,
+            _ => unreachable!()
+        }
     }
-
-    fn counterdirected_with(&self, other: &Self) -> bool {
-        return self.opposite() == *other
-    }
-
 
     fn turn_cw(&self) -> Self{
         match self {
@@ -223,10 +224,19 @@ impl SimpleOrientation for GridOrientation {
             (yori, None)
         } else if dir.1 == 0 {
             (xori, None)
-        } else if dir.1.abs() >= dir.0.abs() {
-            (yori, Some(xori))
+        // special "fair" way of treating border values
+        } else if dir.1 * dir.0 > 0 {
+            if dir.1.abs() >= dir.0.abs() {
+                (yori, Some(xori))
+            } else {
+                (xori, Some(yori))
+            }
         } else {
-            (xori, Some(yori))
+            if dir.1.abs() > dir.0.abs() {
+                (yori, Some(xori))
+            } else {
+                (xori, Some(yori))
+            }
         }
     }
 }
