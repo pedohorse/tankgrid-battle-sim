@@ -32,6 +32,7 @@ impl CommandTimer<PlayerCommand<GridOrientation>> for CommandTimings {
             PlayerCommand::TurnCW => 8,  // half, half after
             PlayerCommand::TurnCCW => 8, // half, half after
             PlayerCommand::Shoot => 5,
+            PlayerCommand::AfterShootCooldown => 20,
             PlayerCommand::Look(_) => 4,
             PlayerCommand::Listen => 3,
             PlayerCommand::Wait => 5,
@@ -53,6 +54,7 @@ impl CommandTimer<PlayerCommand<GridOrientation>> for CommandTimings {
             PlayerCommand::MoveFwd => 5,
             PlayerCommand::TurnCW => 8,
             PlayerCommand::TurnCCW => 8,
+            PlayerCommand::Shoot => 5,
             _ => 0,
         }
     }
