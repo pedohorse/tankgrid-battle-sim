@@ -32,6 +32,7 @@ pub enum PlayerCommand<R> {
     TurnCW,
     TurnCCW,
     Shoot,
+    AfterShootCooldown,
     Wait,
     Print(String),
     CheckAmmo,
@@ -55,6 +56,7 @@ where
             PlayerCommand::TurnCW => Some("turn-cw".to_owned()),
             PlayerCommand::TurnCCW => Some("turn-ccw".to_owned()),
             PlayerCommand::Shoot => Some("shoot".to_owned()),
+            PlayerCommand::AfterShootCooldown => Some("cooldown".to_owned()),
             PlayerCommand::Wait => Some("wait".to_owned()),
             PlayerCommand::Look(dir) => Some(format!("look[{}]", dir.log_repr())),
             PlayerCommand::Listen => Some(format!("listen")),
@@ -342,16 +344,13 @@ where
                     };
                     (
                         PlayerCommandReply::Ok,
-                        Some(vec![
-                            PlayerCommand::Wait,
-                            PlayerCommand::Wait,
-                            PlayerCommand::Wait,
-                        ]),
+                        Some(vec![PlayerCommand::AfterShootCooldown]),
                     ) // some wait after shooting
                 } else {
                     (PlayerCommandReply::Failed, None)
                 }
             }
+            PlayerCommand::AfterShootCooldown => (PlayerCommandReply::Ok, None),
             PlayerCommand::Wait => (PlayerCommandReply::Ok, None),
             PlayerCommand::Look(ori) => {
                 // note: look command's ori is relative to tank orientation
@@ -406,24 +405,43 @@ where
                     let location = if let Some(to_enemy2) = to_enemy2_maybe {
                         // meaning we don't have an exact orientation
                         // NOTE: this logic does not really work for strange, non-uniform and axis-assymetrical kinds of rotation groups!
-                        let left = (to_enemy1.same_as(&my_ori) || to_enemy1.opposite_of(&my_ori)) && to_enemy2.left_of(&my_ori) || !to_enemy1.opposite_of(&my_ori) && to_enemy1.left_of(&my_ori);
-                        let front = to_enemy1.codirected_with(&my_ori) || !to_enemy1.counterdirected_with(&my_ori) && to_enemy2.codirected_with(&my_ori);
-                        match (front, left) {
-                            (false, false) => "back-right",
-                            (false, true) => "back-left",
-                            (true, false) => "front-right",
-                            (true, true) => "front-left",
+                        let left = (to_enemy1.same_as(&my_ori) || to_enemy1.opposite_of(&my_ori))
+                            && to_enemy2.left_of(&my_ori)
+                            || !to_enemy1.opposite_of(&my_ori) && to_enemy1.left_of(&my_ori);
+                        let front = to_enemy1.codirected_with(&my_ori)
+                            || !to_enemy1.counterdirected_with(&my_ori)
+                                && to_enemy2.codirected_with(&my_ori);
+                        let thres = 45.0_f64.to_radians().cos();
+                        let edot = to_enemy1.dot(&my_ori);
+                        let closest_along = if edot > 0.0 {
+                            edot > thres || to_enemy1.left_of(&my_ori) && edot == thres
+                        } else {
+                            edot < -thres || to_enemy1.right_of(&my_ori) && edot == thres
+                        };
+                        match (closest_along, front, left) {
+                            (false, false, false) => "back-right-side",
+                            (false, false, true) => "back-left-side",
+                            (false, true, false) => "front-right-side",
+                            (false, true, true) => "front-left-side",
+                            (true, false, false) => "back-right-along",
+                            (true, false, true) => "back-left-along",
+                            (true, true, false) => "front-right-along",
+                            (true, true, true) => "front-left-along",
                         }
                     } else {
                         // meaning we DO have an exact match
-                        if to_enemy1.same_as(&my_ori) || to_enemy1.codirected_with(&my_ori) && to_enemy1.right_of(&my_ori) {
-                            "front-right"
-                        } else if to_enemy1.opposite_of(&my_ori) || to_enemy1.counterdirected_with(&my_ori) && to_enemy1.left_of(&my_ori) {
-                            "back-left"
+                        if to_enemy1.same_as(&my_ori)
+                            || to_enemy1.codirected_with(&my_ori) && to_enemy1.right_of(&my_ori)
+                        {
+                            "front-right-along"
+                        } else if to_enemy1.opposite_of(&my_ori)
+                            || to_enemy1.counterdirected_with(&my_ori) && to_enemy1.left_of(&my_ori)
+                        {
+                            "back-left-along"
                         } else if to_enemy1.right_of(&my_ori) {
-                            "back-right"
+                            "back-right-side"
                         } else {
-                            "front-left"
+                            "front-left-side"
                         }
                     };
 
@@ -481,9 +499,7 @@ where
                 player_state.expend_resource(PRINT_COUNTER_RES, 1);
                 (PlayerCommandReply::Ok, penalty)
             }
-            PlayerCommand::Time => {
-                (PlayerCommandReply::Uint(battle_state.game_time), None)
-            }
+            PlayerCommand::Time => (PlayerCommandReply::Uint(battle_state.game_time), None),
         }
     }
 
