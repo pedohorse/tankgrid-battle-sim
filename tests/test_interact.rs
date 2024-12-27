@@ -53,7 +53,8 @@ where
                     (PlayerCommand::Look(GridOrientation::East), 5),
                     (PlayerCommand::Look(GridOrientation::South), 5),
                     (PlayerCommand::Look(GridOrientation::West), 5),
-                    (PlayerCommand::Shoot, 10), // don't forget that successful shoot adds 3 waits
+                    (PlayerCommand::Shoot, 10), // don't forget that successful shoot adds 3*5 wait
+                    (PlayerCommand::AfterShootCooldown, 15),
                     (PlayerCommand::Wait, 5),
                     (PlayerCommand::CheckAmmo, 2),
                     (PlayerCommand::CheckHealth, 2),
@@ -274,42 +275,43 @@ if start_ammo == 2 and end_ammo == 1:\n
 
 #[test]
 fn test_hear() {
+    // TODO: not all edge cases covered (diagonals)
     for ((x, y), ori2, res) in [
-        ((25, 2), GridOrientation::North, "front-right"),
-        ((24, 1), GridOrientation::North, "front-right"),
-        ((26, 10), GridOrientation::North, "back-right"),
-        ((25, 5), GridOrientation::North, "back-right"),
-        ((22, 6), GridOrientation::North, "back-left"),
-        ((24, 9), GridOrientation::North, "back-left"),
-        ((20, -4), GridOrientation::North, "front-left"),
-        ((23, 5), GridOrientation::North, "front-left"),
+        ((25, 2), GridOrientation::North, "front-right-along"),
+        ((24, 1), GridOrientation::North, "front-right-along"),
+        ((26, 10), GridOrientation::North, "back-right-along"),
+        ((25, 5), GridOrientation::North, "back-right-side"),
+        ((22, 6), GridOrientation::North, "back-left-side"),
+        ((24, 9), GridOrientation::North, "back-left-along"),
+        ((20, -4), GridOrientation::North, "front-left-along"),
+        ((23, 5), GridOrientation::North, "front-left-side"),
 
-        ((26, 8), GridOrientation::East, "front-right"),
-        ((27, 5), GridOrientation::East, "front-right"),
-        ((22, 6), GridOrientation::East, "back-right"),
-        ((24, 9), GridOrientation::East, "back-right"),
-        ((21, 4), GridOrientation::East, "back-left"),
-        ((13, 5), GridOrientation::East, "back-left"),
-        ((27, 2), GridOrientation::East, "front-left"),
-        ((24, 1), GridOrientation::East, "front-left"),
+        ((26, 8), GridOrientation::East, "front-right-side"),
+        ((27, 5), GridOrientation::East, "front-right-along"),
+        ((22, 6), GridOrientation::East, "back-right-along"),
+        ((24, 9), GridOrientation::East, "back-right-side"),
+        ((21, 4), GridOrientation::East, "back-left-along"),
+        ((13, 5), GridOrientation::East, "back-left-along"),
+        ((27, 2), GridOrientation::East, "front-left-along"),
+        ((24, 1), GridOrientation::East, "front-left-side"),
 
-        ((23, 8), GridOrientation::South, "front-right"),
-        ((24, 9), GridOrientation::South, "front-right"),
-        ((21, 1), GridOrientation::South, "back-right"),
-        ((22, 5), GridOrientation::South, "back-right"),
-        ((35, 1), GridOrientation::South, "back-left"),
-        ((24, -1), GridOrientation::South, "back-left"),
-        ((30, 8), GridOrientation::South, "front-left"),
-        ((25, 5), GridOrientation::South, "front-left"),
+        ((23, 8), GridOrientation::South, "front-right-along"),
+        ((24, 9), GridOrientation::South, "front-right-along"),
+        ((21, 1), GridOrientation::South, "back-right-along"),
+        ((22, 5), GridOrientation::South, "back-right-side"),
+        ((35, 1), GridOrientation::South, "back-left-side"),
+        ((24, -1), GridOrientation::South, "back-left-along"),
+        ((30, 8), GridOrientation::South, "front-left-side"),
+        ((25, 5), GridOrientation::South, "front-left-side"),
 
-        ((21, 2), GridOrientation::West, "front-right"),
-        ((19, 5), GridOrientation::West, "front-right"),
-        ((28, 3), GridOrientation::West, "back-right"),
-        ((24, 0), GridOrientation::West, "back-right"),
-        ((32, 11), GridOrientation::West, "back-left"),
-        ((33, 5), GridOrientation::West, "back-left"),
-        ((17, 11), GridOrientation::West, "front-left"),
-        ((24, 15), GridOrientation::West, "front-left"),
+        ((21, 2), GridOrientation::West, "front-right-side"),
+        ((19, 5), GridOrientation::West, "front-right-along"),
+        ((28, 3), GridOrientation::West, "back-right-along"),
+        ((24, 0), GridOrientation::West, "back-right-side"),
+        ((32, 11), GridOrientation::West, "back-left-along"),
+        ((33, 5), GridOrientation::West, "back-left-along"),
+        ((17, 11), GridOrientation::West, "front-left-along"),
+        ((24, 15), GridOrientation::West, "front-left-side"),
     ] {
         test_base(
             vec![
@@ -326,11 +328,11 @@ wait()\n
                         "\
 res = listen()\n
 assert(len(res) == 1)\n
+print('{res} - expecting')
 print(res)\n
-if res[0] == '{}':\n
+if res[0] == '{res}':\n
     move_forward()\n
-                ",
-                        res
+                "
                     ),
                 ),
             ],
