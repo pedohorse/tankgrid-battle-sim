@@ -65,6 +65,7 @@ fn main() -> ExitCode {
 
 enum ArgsState {
     FlagOrOut,
+    Seed,
     MapWidth,
     MapHeight,
     Nothing,
@@ -91,6 +92,10 @@ fn parse_args() -> Result<Config, Error> {
                     state = ArgsState::MapWidth;
                     continue;
                 }
+                "-r" | "--seed" => {
+                    state = ArgsState::Seed;
+                    continue;
+                }
                 "--opened" => {
                     config.is_opened = true;
                     continue;
@@ -109,6 +114,13 @@ fn parse_args() -> Result<Config, Error> {
             }
             ArgsState::MapHeight => {
                 config.height = match usize::from_str_radix(&arg, 10) {
+                    Ok(x) => x,
+                    Err(e) => return Err(Error::new(ErrorKind::InvalidData, e)),
+                };
+                state = ArgsState::FlagOrOut;
+            }
+            ArgsState::Seed => {
+                config.seed = match u64::from_str_radix(&arg, 10) {
                     Ok(x) => x,
                     Err(e) => return Err(Error::new(ErrorKind::InvalidData, e)),
                 };
