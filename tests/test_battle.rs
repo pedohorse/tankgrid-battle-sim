@@ -81,6 +81,39 @@ fn testtest() {
 }
 
 #[test]
+fn test_time_limit() {
+    let map = GridBattleMap::new(2, 2, SimpleTileType::Nothin, SimpleTileType::Nothin);
+    let logger = VecLogWriter::new();
+    let mut b = GridBattle::new(
+        SimpleBattleLogic::new(
+            map,
+            TestTrivialLogic {},
+            GridMapProber {},
+            SimpleBattleObjectLayer::new(),
+            FnCommandTimer::new(|com| match com {
+                PlayerCommand::Print(_) => 0,
+                _ => 10,
+            }),
+            0,
+        ),
+        vec![(
+            new_player(0, 0, GridOrientation::South, 0, 1, "player1"),
+            "\
+while True:\n
+    turn_cw()\n
+            "
+            .to_owned(),
+        )],
+        logger,
+    );
+    b.run_simulation_with_time_limit(Some(100));
+    println!("BATTLE LOG:");
+    b.log_writer().print();
+    assert_eq!(100, b.time());
+    assert_eq!(GridOrientation::North, b.player_state(0).orientation)
+}
+
+#[test]
 fn test2players() {
     let map = GridBattleMap::new(2, 2, SimpleTileType::Nothin, SimpleTileType::Nothin);
     let logger = VecLogWriter::new();
