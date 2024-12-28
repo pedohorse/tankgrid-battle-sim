@@ -118,6 +118,10 @@ where
     /// returns indices of winner players
     /// if sim ended in an error - there are no winners, so None is returned
     pub fn run_simulation(&mut self) -> Option<Vec<usize>> {
+        self.run_simulation_with_time_limit(None)
+    }
+
+    pub fn run_simulation_with_time_limit(&mut self, game_time_limit: Option<GameTime>) -> Option<Vec<usize>> {
         self.time = 0;
         let player_count = self.player_programs.len();
         let mut winner_ids = None;
@@ -212,7 +216,12 @@ where
                                 0,
                             );
                         }
+                    } else if let Some(time_limit) = game_time_limit {
+                        if self.time >= time_limit {
+                            winner_ids = Some(Vec::new());
+                        }
                     }
+
                 }
                 // if game is ended - we allow pending commands to finalize and enforce Finish state
                 if let Some(_) = winner_ids {
