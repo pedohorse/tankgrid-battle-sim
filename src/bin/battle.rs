@@ -1,3 +1,4 @@
+use battle_sim::gametime::GameTime;
 use battle_sim::map::MapReadAccess;
 use battle_sim::maptile_logic::MaptileLogic;
 use battle_sim::object_layer::ObjectLayer;
@@ -64,6 +65,7 @@ struct Config {
     map_path: PathBuf,
     player_programs: Vec<PathBuf>,
     log_path: Option<PathBuf>,
+    time_limit: Option<GameTime>,
 }
 
 fn main() -> ExitCode {
@@ -179,7 +181,7 @@ fn main() -> ExitCode {
         1,
     );
     let mut battle = GridBattle::new(game_logic, player_initial_data, logger);
-    let winners = battle.run_simulation();
+    let winners = battle.run_simulation_with_time_limit(config.time_limit);
 
     if let Some(winner_ids) = winners {
         println!(
@@ -200,6 +202,7 @@ fn main() -> ExitCode {
 enum ArgsState {
     FlagOrMapPath,
     PlayerProgram,
+    GameTimeLimit,
     PlayerProgramOrDone,
     BattleLogPath,
 }
@@ -210,6 +213,7 @@ fn parse_args() -> Result<Config> {
         map_path: PathBuf::new(),
         player_programs: Vec::new(),
         log_path: None,
+        time_limit: None,
     };
 
     let args = args().skip(1);
@@ -218,6 +222,10 @@ fn parse_args() -> Result<Config> {
             ArgsState::FlagOrMapPath => match arg.as_str() {
                 "-o" | "--output" => {
                     state = ArgsState::BattleLogPath;
+                    continue;
+                }
+                "-l" | "--time-limit" => {
+                    state = ArgsState::GameTimeLimit;
                     continue;
                 }
                 arg => {
@@ -231,6 +239,12 @@ fn parse_args() -> Result<Config> {
             }
             ArgsState::BattleLogPath => {
                 config.log_path = Some(PathBuf::from(arg));
+                state = ArgsState::FlagOrMapPath;
+            }
+            ArgsState::GameTimeLimit => {
+                config.time_limit = Some(if let Ok(x) = u64::from_str_radix(&arg, 10) { x } else {
+                    return Err(Error::new(ErrorKind::InvalidData, "invalid data for time limit"));
+                });
                 state = ArgsState::FlagOrMapPath;
             }
         }
