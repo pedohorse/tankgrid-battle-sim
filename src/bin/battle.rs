@@ -183,17 +183,20 @@ fn main() -> ExitCode {
     let mut battle = GridBattle::new(game_logic, player_initial_data, logger);
     let winners = battle.run_simulation_with_time_limit(config.time_limit);
 
-    if let Some(winner_ids) = winners {
-        println!(
-            "WINNERS:{}",
-            winner_ids
-                .iter()
-                .map(|&x| { x.to_string() })
-                .collect::<Vec<String>>()
-                .join(",")
-        );
-    } else {
-        println!("DRAW");
+    match winners {
+        Some(winner_ids) if winner_ids.len() > 0 => {
+            println!(
+                "WINNERS:{}",
+                winner_ids
+                    .iter()
+                    .map(|&x| { x.to_string() })
+                    .collect::<Vec<String>>()
+                    .join(",")
+            );
+        }
+        _ => {
+            println!("DRAW");
+        }
     }
 
     ExitCode::SUCCESS
@@ -242,8 +245,13 @@ fn parse_args() -> Result<Config> {
                 state = ArgsState::FlagOrMapPath;
             }
             ArgsState::GameTimeLimit => {
-                config.time_limit = Some(if let Ok(x) = u64::from_str_radix(&arg, 10) { x } else {
-                    return Err(Error::new(ErrorKind::InvalidData, "invalid data for time limit"));
+                config.time_limit = Some(if let Ok(x) = u64::from_str_radix(&arg, 10) {
+                    x
+                } else {
+                    return Err(Error::new(
+                        ErrorKind::InvalidData,
+                        "invalid data for time limit",
+                    ));
                 });
                 state = ArgsState::FlagOrMapPath;
             }
