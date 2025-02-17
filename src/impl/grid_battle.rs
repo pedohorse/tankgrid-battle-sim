@@ -1,6 +1,6 @@
 use super::grid_orientation::GridOrientation;
 use super::simple_battle_logic::{
-    PlayerCommand, PlayerCommandReply, AMMO_RES, HEALTH_RES, MAX_FREE_PRINTS, PRINT_COUNTER_RES,
+    PlayerCommand, PlayerCommandReply, SimpleGameEvent, AMMO_RES, HEALTH_RES, MAX_FREE_PRINTS, PRINT_COUNTER_RES,
 };
 use crate::battle::Battle;
 
@@ -27,5 +27,6 @@ pub type GridBattle<GameLogic, LW> = Battle<
     GameLogic,
     PlayerCommand<GridOrientation>,
     PlayerCommandReply<GridOrientation>,
+    SimpleGameEvent,
     LW,
 >;

@@ -6,7 +6,7 @@ use super::battle_state_info::BattleStateInfo;
 use rustpython_vm::scope::Scope;
 use rustpython_vm::vm::VirtualMachine;
 
-pub trait BattleLogic<P, PCom, PComRep, LO, LA>
+pub trait BattleLogic<P, PCom, PComRep, GameEvent, LO, LA>
 where
     P: PlayerControl,
     LO: LogRepresentable,
@@ -26,6 +26,14 @@ where
         let _ = logger; // avoid unused var warning
     }
 
+    fn process_events<LWF>(
+        &mut self,
+        event: &GameEvent,
+        players_states: &mut [P],
+        battle_info: &BattleStateInfo,
+        logger: &mut LWF,
+    ) -> Option<Vec<(GameTime, GameEvent)>>; // time offset till event
+
     fn process_commands<LWF>(
         &mut self,
         player_i: usize,
@@ -33,7 +41,7 @@ where
         player_states: &mut [P],
         battle_info: &BattleStateInfo,
         logger: &mut LWF,
-    ) -> (PComRep, Option<Vec<PCom>>)
+    ) -> (PComRep, Option<Vec<PCom>>, Option<Vec<(GameTime, GameEvent)>>) // last one is time till event, not abs time
     where
         LWF: FnMut(LO, LA);
 

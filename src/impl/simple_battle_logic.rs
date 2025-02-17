@@ -103,6 +103,12 @@ pub trait CommandTimer<PC> {
     }
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum SimpleGameEvent {
+    Noop,
+    FinalizeDeath(usize),
+}
+
 pub struct SimpleBattleLogic<T, M, L, Pr, R, OLayer, Fdur>
 where
     L: MaptileLogic<T>,
@@ -118,6 +124,7 @@ where
     command_duration: Fdur,
     object_layer: OLayer,
     player_count_to_win: usize,
+    live_with_no_hp_time: GameTime,
     _marker0: PhantomData<R>,
     _marker1: PhantomData<T>,
 }
@@ -126,9 +133,10 @@ pub const HEALTH_RES: usize = 0;
 pub const AMMO_RES: usize = 1;
 pub const HIT_DIR_RES: usize = 2;
 pub const PRINT_COUNTER_RES: usize = 3;
+pub const DEATH_CHECK_TIME: usize = 4;
 
 impl<T, M, L, R, P, Pr, OLayer, Fdur>
-    BattleLogic<P, PlayerCommand<R>, PlayerCommandReply<R>, String, String>
+    BattleLogic<P, PlayerCommand<R>, PlayerCommandReply<R>, SimpleGameEvent, String, String>
     for SimpleBattleLogic<T, M, L, Pr, R, OLayer, Fdur>
 where
     T: Copy + Clone + Send + ToScriptRepr,
@@ -153,18 +161,22 @@ where
     Fdur: CommandTimer<PlayerCommand<R>>,
 {
     fn is_player_dead(&self, player: &P) -> bool {
-        player.resource_value(HEALTH_RES) <= 0
+        player.resource_value(HEALTH_RES) <= 0 && player.resource_value(DEATH_CHECK_TIME) <= 0
     }
 
     fn game_finished(&self, players: &[P]) -> Option<Vec<usize>> {
         // default impl returns true when only single player left
+        let mut some_are_dying = false;
         let maybe_winners: Vec<usize> = players
             .iter()
             .enumerate()
             .filter(|(_, p)| !self.is_player_dead(*p))
-            .map(|(i, _)| i)
+            .map(|(i, p)| {
+                some_are_dying = some_are_dying || p.resource_value(HEALTH_RES) == 0 && p.resource_value(DEATH_CHECK_TIME) != 0;
+                i
+            })
             .collect();
-        if maybe_winners.len() <= self.player_count_to_win {
+        if maybe_winners.len() <= self.player_count_to_win && !some_are_dying {
             Some(maybe_winners)
         } else {
             None
@@ -199,6 +211,35 @@ where
         }
     }
 
+    fn process_events<LWF>(
+        &mut self,
+        event: &SimpleGameEvent,
+        players_states: &mut [P],
+        battle_info: &BattleStateInfo,
+        logger: &mut LWF,
+    ) -> Option<Vec<(GameTime, SimpleGameEvent)>> {
+        let mut new_events = Vec::new();
+
+        match event {
+            SimpleGameEvent::Noop => (),
+            SimpleGameEvent::FinalizeDeath(player_i) => {
+                let player_state = &mut players_states[*player_i];
+                // first check if player healed during that time. if so - ignore everything
+                if player_state.resource_value(HEALTH_RES) == 0
+                    && player_state.resource_value(DEATH_CHECK_TIME) <= battle_info.game_time
+                {
+                    player_state.set_resource(DEATH_CHECK_TIME, 0);
+                }
+            }
+        };
+
+        if new_events.len() > 0 {
+            Some(new_events)
+        } else {
+            None
+        }
+    }
+
     fn process_commands<LWF>(
         &mut self,
         player_i: usize,
@@ -206,7 +247,11 @@ where
         player_states: &mut [P],
         battle_state: &BattleStateInfo,
         logger: &mut LWF,
-    ) -> (PlayerCommandReply<R>, Option<Vec<PlayerCommand<R>>>)
+    ) -> (
+        PlayerCommandReply<R>,
+        Option<Vec<PlayerCommand<R>>>,
+        Option<Vec<(GameTime, SimpleGameEvent)>>,
+    )
     where
         LWF: FnMut(String, String),
     {
@@ -265,7 +310,7 @@ where
                     PlayerCommandReply::Failed
                 };
 
-                (reply, extra_commands)
+                (reply, extra_commands, None)
             }
             PlayerCommand::TurnCW => {
                 self.recache_players_to_object_layer(player_states);
@@ -275,7 +320,7 @@ where
                     player_state.log_repr(),
                     format!("turn[{}]", player_state.orientation().log_repr()),
                 );
-                (PlayerCommandReply::Ok, None)
+                (PlayerCommandReply::Ok, None, None)
             }
             PlayerCommand::TurnCCW => {
                 self.recache_players_to_object_layer(player_states);
@@ -285,9 +330,10 @@ where
                     player_state.log_repr(),
                     format!("turn[{}]", player_state.orientation().log_repr()),
                 );
-                (PlayerCommandReply::Ok, None)
+                (PlayerCommandReply::Ok, None, None)
             }
             PlayerCommand::Shoot => {
+                let mut event_maybe = None;
                 let player_state = &mut player_states[player_i];
                 if player_state.resource_value(AMMO_RES) > 0 {
                     player_state.expend_resource(AMMO_RES, 1);
@@ -319,7 +365,24 @@ where
                             match obj.obj_type {
                                 ObjectCacheType::Player(other_player_i) => {
                                     let hit_enemy = &mut player_states[other_player_i];
+
+                                    let was_alive = hit_enemy.resource_value(HEALTH_RES) > 0;
                                     hit_enemy.expend_resource(HEALTH_RES, 1);
+                                    if was_alive
+                                        && hit_enemy.resource_value(HEALTH_RES) <= 0
+                                        && self.live_with_no_hp_time > 0
+                                    {
+                                        hit_enemy.set_resource(
+                                            DEATH_CHECK_TIME,
+                                            battle_state.game_time + self.live_with_no_hp_time,
+                                        );
+                                        event_maybe = Some(vec![(
+                                            self.live_with_no_hp_time,
+                                            SimpleGameEvent::FinalizeDeath(other_player_i),
+                                        )]);
+                                        logger(hit_enemy.log_repr(), format!("dying"));
+                                    }
+
                                     let hit_relative_direction = player_ori
                                         .opposite()
                                         .global_to_relative_to(&hit_enemy.orientation());
@@ -345,13 +408,14 @@ where
                     (
                         PlayerCommandReply::Ok,
                         Some(vec![PlayerCommand::AfterShootCooldown]),
+                        event_maybe,
                     ) // some wait after shooting
                 } else {
-                    (PlayerCommandReply::Failed, None)
+                    (PlayerCommandReply::Failed, None, None)
                 }
             }
-            PlayerCommand::AfterShootCooldown => (PlayerCommandReply::Ok, None),
-            PlayerCommand::Wait => (PlayerCommandReply::Ok, None),
+            PlayerCommand::AfterShootCooldown => (PlayerCommandReply::Ok, None, None),
+            PlayerCommand::Wait => (PlayerCommandReply::Ok, None, None),
             PlayerCommand::Look(ori) => {
                 // note: look command's ori is relative to tank orientation
                 // so we need to convert it to global orientation
@@ -388,7 +452,7 @@ where
                     })
                     .collect();
 
-                (PlayerCommandReply::LookResult(look_result), None)
+                (PlayerCommandReply::LookResult(look_result), None, None)
             }
             PlayerCommand::Listen => {
                 let mut res = Vec::with_capacity(player_states.len());
@@ -447,27 +511,30 @@ where
 
                     res.push(location.to_owned());
                 }
-                (PlayerCommandReply::ListenResult(res), None)
+                (PlayerCommandReply::ListenResult(res), None, None)
             }
             PlayerCommand::AddAmmo(ammo) => {
                 let player_state = &mut player_states[player_i];
                 player_state.gain_resource(AMMO_RES, *ammo);
-                (PlayerCommandReply::Ok, None)
+                (PlayerCommandReply::Ok, None, None)
             }
             PlayerCommand::AddHealth(health) => {
                 let player_state = &mut player_states[player_i];
                 player_state.gain_resource(HEALTH_RES, *health);
-                (PlayerCommandReply::Ok, None)
+                if player_state.resource_value(HEALTH_RES) > 0 {
+                    player_state.set_resource(DEATH_CHECK_TIME, 0);
+                }
+                (PlayerCommandReply::Ok, None, None)
             }
             PlayerCommand::CheckAmmo => {
                 let player_state = &player_states[player_i];
                 let val = player_state.resource_value(AMMO_RES);
-                (PlayerCommandReply::Int(val as i64), None)
+                (PlayerCommandReply::Int(val as i64), None, None)
             }
             PlayerCommand::CheckHealth => {
                 let player_state = &player_states[player_i];
                 let val = player_state.resource_value(HEALTH_RES);
-                (PlayerCommandReply::Int(val as i64), None)
+                (PlayerCommandReply::Int(val as i64), None, None)
             }
             PlayerCommand::CheckHit => {
                 let player_state = &mut player_states[player_i];
@@ -478,12 +545,12 @@ where
                     Some(R::from(repr_res_value - 1))
                 };
                 player_state.set_resource(HIT_DIR_RES, 0); // once read - last hit is set back to None
-                (PlayerCommandReply::HitDirection(hit_direction), None)
+                (PlayerCommandReply::HitDirection(hit_direction), None, None)
             }
             PlayerCommand::ResetHit => {
                 let player_state = &mut player_states[player_i];
                 player_state.set_resource(HIT_DIR_RES, 0);
-                (PlayerCommandReply::Ok, None)
+                (PlayerCommandReply::Ok, None, None)
             }
             PlayerCommand::Print(ref line) => {
                 let player_state = &mut player_states[player_i];
@@ -497,9 +564,9 @@ where
                     _ => logger(player_state.log_repr(), format!("log[{}]", line)),
                 }
                 player_state.expend_resource(PRINT_COUNTER_RES, 1);
-                (PlayerCommandReply::Ok, penalty)
+                (PlayerCommandReply::Ok, penalty, None)
             }
-            PlayerCommand::Time => (PlayerCommandReply::Uint(battle_state.game_time), None),
+            PlayerCommand::Time => (PlayerCommandReply::Uint(battle_state.game_time), None, None),
         }
     }
 
@@ -755,7 +822,19 @@ where
     L: MaptileLogic<T>,
     M: MapReadAccess<T>,
     Pr: MapProber<T, R, M, L, SimpleObject<R>, OLayer>,
-    R: Copy + Clone + Eq + Hash + Send + 'static + FromScriptRepr,
+    R: Copy
+        + Clone
+        + Eq
+        + Hash
+        + Send
+        + 'static
+        + SimpleOrientation
+        + FromScriptRepr
+        + ToScriptRepr
+        + LogRepresentable
+        + Into<u64>
+        + From<u64>
+        + std::fmt::Debug,
     OLayer: ObjectLayer<R, SimpleObject<R>>,
     Fdur: CommandTimer<PlayerCommand<R>>,
 {
@@ -766,6 +845,7 @@ where
         object_layer: OLayer,
         command_duration: Fdur,
         player_count_to_win: usize,
+        live_with_no_hp_time: GameTime,
     ) -> SimpleBattleLogic<T, M, L, Pr, R, OLayer, Fdur> {
         SimpleBattleLogic {
             map,
@@ -774,6 +854,7 @@ where
             object_layer,
             command_duration,
             player_count_to_win,
+            live_with_no_hp_time,
             _marker0: PhantomData,
             _marker1: PhantomData,
         }
@@ -782,7 +863,7 @@ where
     fn recache_players_to_object_layer<P>(&mut self, player_states: &[P])
     where
         // TODO: player does NOT have to impl MapObject
-        P: PlayerControl + MapObject<R> + ToScriptRepr,
+        P: PlayerControl + MapObject<R> + ToScriptRepr + LogRepresentable,
     {
         // clear player cache
         self.object_layer.clear_by(|m| {
@@ -794,7 +875,7 @@ where
         });
         // repopulate player cache
         for (i, player) in player_states.iter().enumerate() {
-            if player.resource_value(HEALTH_RES) <= 0 {
+            if self.is_player_dead(player) {
                 // if dead (TODO: may spawn a corpse object instead)
                 continue;
             }

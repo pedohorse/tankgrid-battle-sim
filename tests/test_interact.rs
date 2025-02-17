@@ -1,3 +1,4 @@
+use battle_sim::gametime::GameTime;
 use battle_sim::map::MapWriteAccess;
 use battle_sim::object_layer::ObjectLayer;
 use battle_sim::r#impl::grid_battle::{new_player, GridBattle, GridPlayerState};
@@ -13,8 +14,12 @@ use std::collections::HashMap;
 mod common;
 use common::{HashmapCommandTimer, SimpleTileType, TestSimpleLogic, VecLogWriter};
 
-fn test_base<F>(player_programs: Vec<(GridPlayerState, String)>, checks: F)
-where
+fn test_base<F>(
+    player_programs: Vec<(GridPlayerState, String)>,
+    checks: F,
+    player_count_to_win: usize,
+    live_with_no_hp_time: GameTime,
+) where
     F: FnOnce(
         GridBattle<
             SimpleBattleLogic<
@@ -28,6 +33,7 @@ where
             >,
             VecLogWriter<String, String>,
         >,
+        Option<Vec<usize>>,
     ),
 {
     let mut map = GridBattleMap::new(10, 10, SimpleTileType::Nothin, SimpleTileType::Nothin);
@@ -68,15 +74,16 @@ where
                 0,
                 0,
             ),
-            0,
+            player_count_to_win,
+            live_with_no_hp_time,
         ),
         player_programs,
         logger,
     );
-    b.run_simulation();
+    let winners = b.run_simulation();
     println!("BATTLE LOG:");
     b.log_writer().print();
-    checks(b);
+    checks(b, winners);
 }
 
 #[test]
@@ -109,11 +116,13 @@ if looked[-1][1].startswith('player'):\n
                 .to_owned(),
             ),
         ],
-        |b| {
+        |b, _| {
             assert_eq!(25, b.time());
             assert_eq!(21, b.player_state(1).col);
             assert_eq!(5, b.player_state(1).row);
         },
+        0,
+        0,
     );
 }
 
@@ -149,11 +158,13 @@ if looked == [('empty_tile', None), ('wall', None)]:\n
                 .to_owned(),
             ),
         ],
-        |b| {
+        |b, _| {
             assert_eq!(50, b.time());
             assert_eq!(6, b.player_state(1).col);
             assert_eq!(2, b.player_state(1).row);
         },
+        0,
+        0,
     );
 }
 
@@ -189,11 +200,13 @@ if looked == [('empty_tile', None), ('wall', None)]:\n
                 .to_owned(),
             ),
         ],
-        |b| {
+        |b, _| {
             assert_eq!(50, b.time());
             assert_eq!(6, b.player_state(1).col);
             assert_eq!(6, b.player_state(1).row);
         },
+        0,
+        0,
     );
 }
 
@@ -229,10 +242,12 @@ shoot()\n
                 .to_owned(),
             ),
         ],
-        |b| {
+        |b, _| {
             assert_eq!(19, b.player_state(0).col); // it starts looking south, then turns cw
             assert_eq!(7, b.player_state(0).row);
         },
+        0,
+        0,
     );
 }
 
@@ -264,12 +279,14 @@ if start_ammo == 2 and end_ammo == 1:\n
                 .to_owned(),
             ),
         ],
-        |b| {
+        |b, _| {
             assert_eq!(20, b.player_state(0).col);
             assert_eq!(8, b.player_state(0).row);
             assert_eq!(29, b.player_state(1).col);
             assert_eq!(7, b.player_state(1).row);
         },
+        0,
+        0,
     );
 }
 
@@ -285,7 +302,7 @@ fn test_hear() {
         ((24, 9), GridOrientation::North, "back-left-along"),
         ((20, -4), GridOrientation::North, "front-left-along"),
         ((23, 5), GridOrientation::North, "front-left-side"),
-
+        //
         ((26, 8), GridOrientation::East, "front-right-side"),
         ((27, 5), GridOrientation::East, "front-right-along"),
         ((22, 6), GridOrientation::East, "back-right-along"),
@@ -294,7 +311,7 @@ fn test_hear() {
         ((13, 5), GridOrientation::East, "back-left-along"),
         ((27, 2), GridOrientation::East, "front-left-along"),
         ((24, 1), GridOrientation::East, "front-left-side"),
-
+        //
         ((23, 8), GridOrientation::South, "front-right-along"),
         ((24, 9), GridOrientation::South, "front-right-along"),
         ((21, 1), GridOrientation::South, "back-right-along"),
@@ -303,7 +320,7 @@ fn test_hear() {
         ((24, -1), GridOrientation::South, "back-left-along"),
         ((30, 8), GridOrientation::South, "front-left-side"),
         ((25, 5), GridOrientation::South, "front-left-side"),
-
+        //
         ((21, 2), GridOrientation::West, "front-right-side"),
         ((19, 5), GridOrientation::West, "front-right-along"),
         ((28, 3), GridOrientation::West, "back-right-along"),
@@ -336,7 +353,7 @@ if res[0] == '{res}':\n
                     ),
                 ),
             ],
-            |b| {
+            |b, _| {
                 let fwd = match ori2 {
                     GridOrientation::North => (24, 4),
                     GridOrientation::East => (25, 5),
@@ -346,10 +363,11 @@ if res[0] == '{res}':\n
                 assert_eq!(fwd.0, b.player_state(1).col);
                 assert_eq!(fwd.1, b.player_state(1).row);
             },
+            0,
+            0,
         );
     }
 }
-
 
 #[test]
 fn test_move_timings1() {
@@ -385,13 +403,14 @@ shoot() # 10 =115\n
                 .to_owned(),
             ),
         ],
-        |b| {
+        |b, _| {
             assert_eq!(20, b.player_state(0).col);
             assert_eq!(11, b.player_state(0).row);
         },
+        0,
+        0,
     );
 }
-
 
 #[test]
 fn test_move_timings2() {
@@ -427,13 +446,14 @@ shoot() # 10 =117\n
                 .to_owned(),
             ),
         ],
-        |b| {
+        |b, _| {
             assert_eq!(20, b.player_state(0).col);
             assert_eq!(11, b.player_state(0).row);
         },
+        0,
+        0,
     );
 }
-
 
 #[test]
 fn test_turn_cw_timings1() {
@@ -465,13 +485,14 @@ shoot() # 10 =45\n
                 .to_owned(),
             ),
         ],
-        |b| {
+        |b, _| {
             assert_eq!(19, b.player_state(0).col);
             assert_eq!(6, b.player_state(0).row);
         },
+        0,
+        0,
     );
 }
-
 
 #[test]
 fn test_turn_cw_timings2() {
@@ -502,9 +523,214 @@ shoot() # 10 =40\n
                 .to_owned(),
             ),
         ],
-        |b| {
+        |b, _| {
             assert_eq!(19, b.player_state(0).col);
             assert_eq!(6, b.player_state(0).row);
         },
+        0,
+        0,
+    );
+}
+
+///
+/// test of the simplest case of delayed death
+#[test]
+fn test_delayed_death_simple() {
+    test_base(
+        vec![
+            (
+                new_player(20, 7, GridOrientation::West, 100, 1, "player1"),
+                "
+while True:
+    move_forward()
+                "
+                .to_owned(),
+            ),
+            (
+                new_player(25, 7, GridOrientation::West, 100, 1, "player2"),
+                "
+shoot()
+                "
+                .to_owned(),
+            ),
+        ],
+        |b, _| {
+            assert_eq!(37, b.time());
+            // ensure that "dying" player was able to make extra move
+            assert_eq!(18, b.player_state(0).col);
+        },
+        1,
+        27,
+    );
+}
+
+///
+/// this test tests that multiple shots into the dying player does not reset dying timers
+#[test]
+fn test_delayed_death_double_shot() {
+    test_base(
+        vec![
+            (
+                new_player(20, 7, GridOrientation::West, 100, 1, "player1"),
+                "
+while True:
+    move_forward()
+                "
+                .to_owned(),
+            ),
+            (
+                new_player(25, 7, GridOrientation::West, 100, 1, "player2"),
+                "
+shoot()
+shoot()
+                "
+                .to_owned(),
+            ),
+        ],
+        |b, _| {
+            assert_eq!(53, b.time());
+            // ensure that "dying" player was able to make extra move
+            assert_eq!(17, b.player_state(0).col);
+        },
+        1,
+        43,
+    );
+}
+
+///
+/// delayed death, mirror case
+#[test]
+fn test_delayed_death_mirror() {
+    test_base(
+        vec![
+            (
+                new_player(20, 7, GridOrientation::East, 100, 1, "player1"),
+                "
+shoot()
+move_forward()
+                "
+                .to_owned(),
+            ),
+            (
+                new_player(30, 7, GridOrientation::West, 100, 1, "player2"),
+                "
+shoot()
+move_forward()
+                "
+                .to_owned(),
+            ),
+        ],
+        |b, winners| {
+            assert_eq!(39, b.time());
+            // ensure that "dying" player was able to make extra move
+            assert_eq!(21, b.player_state(0).col);
+            assert_eq!(29, b.player_state(1).col);
+
+            // there should not be a "win" log anywhere
+            for log_data in b.log_writer().log_datas.iter() {
+                assert_ne!("win", log_data.1);
+            }
+
+            // there must be NO winners
+            assert_eq!(Some(vec![]), winners);
+        },
+        1,
+        29,
+    );
+}
+
+///
+/// delayed death, delayed mirror case, where one already dead, another still dying
+#[test]
+fn test_delayed_death_delayed_mirror() {
+    test_base(
+        vec![
+            (
+                new_player(20, 7, GridOrientation::East, 100, 1, "player1"),
+                "
+wait()
+wait()
+wait()
+shoot()
+move_forward()
+                "
+                .to_owned(),
+            ),
+            (
+                new_player(30, 7, GridOrientation::West, 100, 1, "player2"),
+                "
+shoot()
+move_forward()
+move_forward()
+move_forward()
+                "
+                .to_owned(),
+            ),
+        ],
+        |b, winners| {
+            assert_eq!(54, b.time());
+            // ensure that second "dying" player was able to make extra move, first had no time
+            assert_eq!(20, b.player_state(0).col);
+            assert_eq!(29, b.player_state(1).col);
+
+            // there should not be a "win" log anywhere
+            for log_data in b.log_writer().log_datas.iter() {
+                assert_ne!("win", log_data.1);
+            }
+
+            // there must be NO winners
+            assert_eq!(Some(vec![]), winners);
+        },
+        1,
+        29,
+    );
+}
+
+///
+/// delayed death, delayed mirror case, same as prev test (test_delayed_death_delayed_mirror)
+/// BUT here player program ends BEFORE death event happens
+#[test]
+fn test_delayed_death_delayed_mirror_prog_end() {
+    test_base(
+        vec![
+            (
+                new_player(20, 7, GridOrientation::East, 100, 1, "player1"),
+                "
+wait()
+wait()
+wait()
+shoot()
+move_forward()
+                "
+                .to_owned(),
+            ),
+            (
+                new_player(30, 7, GridOrientation::West, 100, 1, "player2"),
+                "
+shoot()
+move_forward()
+                "
+                .to_owned(),
+            ),
+        ],
+        |b, winners| {
+            // current logic is to NOT wait for events,
+            // instead quit as soon as all programs end,
+            // therefore player2 will be left dying, noone wins
+            assert_eq!(45, b.time());
+            // ensure that second "dying" player was able to make extra move, first had no time
+            assert_eq!(20, b.player_state(0).col);
+            assert_eq!(29, b.player_state(1).col);
+
+            // there should not be a "win" log anywhere
+            for log_data in b.log_writer().log_datas.iter() {
+                assert_ne!("win", log_data.1);
+            }
+
+            // there must be NO winners
+            assert_eq!(Some(vec![]), winners);
+        },
+        1,
+        29,
     );
 }

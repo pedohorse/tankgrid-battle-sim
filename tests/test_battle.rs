@@ -61,6 +61,7 @@ fn testtest() {
                 _ => 10,
             }),
             0,
+            0,
         ),
         vec![(
             new_player(0, 0, GridOrientation::South, 0, 1, "player1"),
@@ -94,6 +95,7 @@ fn test_time_limit() {
                 PlayerCommand::Print(_) => 0,
                 _ => 10,
             }),
+            0,
             0,
         ),
         vec![(
@@ -129,6 +131,7 @@ fn test2players() {
                 PlayerCommand::Print(_) => 0,
                 _ => 10,
             }),
+            0,
             0,
         ),
         vec![
@@ -189,6 +192,7 @@ fn test_2players_move_into_each_other() {
                 10,
                 0,
             ),
+            0,
             0,
         ),
         vec![
@@ -251,6 +255,7 @@ fn test_2players_move_past_each_other() {
                 0,
             ),
             0,
+            0,
         ),
         vec![
             (
@@ -309,6 +314,7 @@ fn test_2players_move_into_each_other_but_shoot() {
                 PlayerCommand::Print(_) => 0,
                 _ => 10,
             }),
+            0,
             0,
         ),
         vec![
@@ -376,6 +382,7 @@ fn test2players_inf_loop() {
                 _ => 10,
             }),
             0,
+            0,
         ),
         vec![
             (
@@ -423,6 +430,7 @@ fn test2players_bad_inf_loop() {
                 PlayerCommand::Print(_) => 0,
                 _ => 10,
             }),
+            0,
             0,
         ),
         vec![
@@ -475,6 +483,7 @@ fn test_print_limit() {
                     _ => 10,
                 }
             }),
+            0,
             0,
         ),
         vec![(
@@ -534,6 +543,7 @@ fn test_print_convert() {
                 _ => 10,
             }),
             0,
+            0,
         ),
         vec![(
             new_player(0, 0, GridOrientation::South, 0, 1, "player1"),
@@ -569,6 +579,7 @@ fn test_rand() {
                     PlayerCommand::Print(_) => 0,
                     _ => 10,
                 }),
+                0,
                 0,
             ),
             vec![(
@@ -638,6 +649,7 @@ fn test_2players_shoot_win_stop() {
                 _ => 10,
             }),
             1,
+            0,
         ),
         vec![
             (
@@ -698,6 +710,7 @@ fn test_4players_log_order() {
                 PlayerCommand::Print(_) => 0,
                 _ => 10,
             }),
+            0,
             0,
         ),
         vec![
@@ -775,6 +788,7 @@ fn test_time_command() {
                 PlayerCommand::Print(_) => 0,
                 _ => 10,
             }),
+            0,
             0,
         ),
         vec![(

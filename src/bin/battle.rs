@@ -179,6 +179,7 @@ fn main() -> ExitCode {
         object_layer,
         CommandTimings {},
         1,
+        30,
     );
     let mut battle = GridBattle::new(game_logic, player_initial_data, logger);
     let winners = battle.run_simulation_with_time_limit(config.time_limit);

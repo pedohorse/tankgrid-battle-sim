@@ -1,4 +1,5 @@
 use std::cmp::Eq;
+use std::collections::BinaryHeap;
 use std::collections::VecDeque;
 use std::hash::{DefaultHasher, Hash, Hasher};
 use std::marker::PhantomData;
@@ -38,6 +39,35 @@ pub enum PlayerCommandState<PC, PR> {
     Finish,
 }
 
+#[derive(Clone, Copy, Debug)]
+pub struct GameEventItem<GameEvent> {
+    time: GameTime,
+    event: GameEvent,
+}
+
+// note: all comparisons are ONLY based on time, this is for the heap
+impl<GameEvent> PartialEq for GameEventItem<GameEvent> {
+    fn eq(&self, other: &Self) -> bool {
+        self.time == other.time
+    }
+}
+
+impl<GameEvent> Eq for GameEventItem<GameEvent> {}
+
+impl<GameEvent> PartialOrd for GameEventItem<GameEvent> {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl<GameEvent> Ord for GameEventItem<GameEvent> {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        // reverse comparison to make max-heap into a min-heap
+        // so now event item comparison sorta shows their relative priority
+        other.time.cmp(&self.time)
+    }
+}
+
 impl<PC, PR> PlayerCommandState<PC, PR> {
     pub fn take(&mut self) -> PlayerCommandState<PC, PR> {
         mem::replace(self, PlayerCommandState::None)
@@ -52,11 +82,11 @@ impl<PC, PR> PlayerCommandState<PC, PR> {
     }
 }
 
-pub struct Battle<P, BLogic, PCom, PComRep, LW>
+pub struct Battle<P, BLogic, PCom, PComRep, GameEvent, LW>
 where
     P: PlayerControl + LogRepresentable,
     PCom: MaybeLogRepresentable,
-    BLogic: BattleLogic<P, PCom, PComRep, String, String>,
+    BLogic: BattleLogic<P, PCom, PComRep, GameEvent, String, String>,
     LW: LogWriter<String, String>,
 {
     player_states: Vec<P>,
@@ -66,25 +96,26 @@ where
     log_writer: LW,
     player_death_logged: Vec<bool>,
     next_command_id: usize, // each player command will get a unique id for logging
-    _marker: PhantomData<(PCom, PComRep)>,
+    _marker: PhantomData<(PCom, PComRep, GameEvent)>,
 }
 
 pub const DEFAULT_COMMAND_DURATION: GameTime = 10;
 pub const VM_THINK_TIMEOUT: time::Duration = time::Duration::from_secs(5);
 
-impl<P, BLogic, PCom, PComRep, LW> Battle<P, BLogic, PCom, PComRep, LW>
+impl<P, BLogic, PCom, PComRep, GameEvent, LW> Battle<P, BLogic, PCom, PComRep, GameEvent, LW>
 where
     P: PlayerControl + ToScriptRepr + LogRepresentable,
-    BLogic: BattleLogic<P, PCom, PComRep, String, String>,
+    BLogic: BattleLogic<P, PCom, PComRep, GameEvent, String, String>,
     PCom: MaybeLogRepresentable + Hash + Clone + PartialEq + Eq + Send + 'static,
     PComRep: CommandReplyStat + Clone + PartialEq + Send + 'static,
     LW: LogWriter<String, String>,
+    GameEvent: Clone + PartialEq,
 {
     pub fn new(
         battle_logic: BLogic,
         player_initial_states_and_programs: Vec<(P, String)>,
         log_writer: LW,
-    ) -> Battle<P, BLogic, PCom, PComRep, LW> {
+    ) -> Battle<P, BLogic, PCom, PComRep, GameEvent, LW> {
         let (player_states, player_programs): (Vec<P>, Vec<String>) =
             player_initial_states_and_programs.into_iter().unzip();
         Battle {
@@ -121,7 +152,10 @@ where
         self.run_simulation_with_time_limit(None)
     }
 
-    pub fn run_simulation_with_time_limit(&mut self, game_time_limit: Option<GameTime>) -> Option<Vec<usize>> {
+    pub fn run_simulation_with_time_limit(
+        &mut self,
+        game_time_limit: Option<GameTime>,
+    ) -> Option<Vec<usize>> {
         self.time = 0;
         let player_count = self.player_programs.len();
         let mut winner_ids = None;
@@ -169,6 +203,8 @@ where
 
             let mut next_commands: Vec<PlayerCommandState<PCom, PComRep>> =
                 vec![PlayerCommandState::None; player_count];
+
+            let mut next_events_queue: BinaryHeap<GameEventItem<GameEvent>> = BinaryHeap::new();
 
             // initial logic setup
             self.battle_logic
@@ -221,7 +257,6 @@ where
                             winner_ids = Some(Vec::new());
                         }
                     }
-
                 }
                 // if game is ended - we allow pending commands to finalize and enforce Finish state
                 if let Some(_) = winner_ids {
@@ -337,6 +372,10 @@ where
                         .iter()
                         .all(|x| PlayerCommandState::Finish == *x)
                     {
+                        // If there is no winners set at this point - it is a DRAW
+                        if let None = winner_ids {
+                            winner_ids = Some(Vec::new());
+                        }
                         break;
                     }
 
@@ -414,85 +453,123 @@ where
                         })
                         .min_by_key(|k| k.0)
                     {
-                        // advance time first!
-                        self.time += remaining_duration;
+                        // either system event goes first, or user
+                        if next_events_queue.len() > 0
+                            && next_events_queue.peek().unwrap().time < self.time + remaining_duration
+                        {
+                            // processing game events
+                            let next_event = next_events_queue.pop().unwrap(); // we checked len in if condition
+                                                                                     // advance time first!
+                            self.time = next_event.time;
+                            let battle_state = BattleStateInfo::new(self.time);
 
-                        // process the next command
-                        match next_command.take() {
-                            PlayerCommandState::GotCommand(
-                                com,
-                                need_to_reply,
-                                _,
-                                _,
-                                reply_delay_duration,
-                                command_id,
-                            ) => {
-                                let battle_state = BattleStateInfo::new(self.time);
+                            if let Some(extra_events) = self.battle_logic.process_events(
+                                &next_event.event,
+                                &mut self.player_states,
+                                &battle_state,
+                                &mut |obj, act| {
+                                    self.log_writer.add_log_data(obj, act, self.time, 0);
+                                },
+                            ) {
+                                next_events_queue.extend(extra_events.into_iter().map(
+                                    |(time_delta, event)| GameEventItem {
+                                        time: self.time + time_delta,
+                                        event,
+                                    },
+                                ));
+                            };
+                        } else {
+                            // processing player commands
+                            // advance time first!
+                            self.time += remaining_duration;
 
-                                let (reply, extra_actions_maybe) =
-                                    self.battle_logic.process_commands(
-                                        player_i,
-                                        &com,
-                                        &mut self.player_states,
-                                        &battle_state,
-                                        &mut |obj, act| {
-                                            self.log_writer.add_log_data(obj, act, self.time, 0);
-                                        },
-                                    );
-                                if let Some(extra_actions) = extra_actions_maybe {
-                                    player_extra_commands_queues[player_i].extend(extra_actions);
+                            // process the next command
+                            match next_command.take() {
+                                PlayerCommandState::GotCommand(
+                                    com,
+                                    need_to_reply,
+                                    _,
+                                    _,
+                                    reply_delay_duration,
+                                    command_id,
+                                ) => {
+                                    let battle_state = BattleStateInfo::new(self.time);
+
+                                    let (reply, extra_actions_maybe, extra_events_maybe) =
+                                        self.battle_logic.process_commands(
+                                            player_i,
+                                            &com,
+                                            &mut self.player_states,
+                                            &battle_state,
+                                            &mut |obj, act| {
+                                                self.log_writer
+                                                    .add_log_data(obj, act, self.time, 0);
+                                            },
+                                        );
+                                    if let Some(extra_actions) = extra_actions_maybe {
+                                        player_extra_commands_queues[player_i]
+                                            .extend(extra_actions);
+                                    }
+                                    if let Some(extra_events) = extra_events_maybe {
+                                        next_events_queue.extend(extra_events.into_iter().map(
+                                            |(time_delta, event)| GameEventItem {
+                                                time: self.time + time_delta,
+                                                event,
+                                            },
+                                        ));
+                                    }
+
+                                    *next_command = PlayerCommandState::GotCommandReply(
+                                        com,
+                                        reply,
+                                        need_to_reply,
+                                        self.time,
+                                        reply_delay_duration,
+                                        command_id,
+                                    )
                                 }
-
-                                *next_command = PlayerCommandState::GotCommandReply(
+                                PlayerCommandState::GotCommandReply(
                                     com,
                                     reply,
                                     need_to_reply,
-                                    self.time,
-                                    reply_delay_duration,
+                                    _,
+                                    _,
                                     command_id,
-                                )
-                            }
-                            PlayerCommandState::GotCommandReply(
-                                com,
-                                reply,
-                                need_to_reply,
-                                _,
-                                _,
-                                command_id,
-                            ) => {
-                                // ONLY Finished command may have None for reply channel by design
-                                //  also we bravely unwrap cuz channels may close only in the start of the loop
-                                let reply_channel = &channels[player_i].as_ref().unwrap().1;
+                                ) => {
+                                    // ONLY Finished command may have None for reply channel by design
+                                    //  also we bravely unwrap cuz channels may close only in the start of the loop
+                                    let reply_channel = &channels[player_i].as_ref().unwrap().1;
 
-                                let command_succeeded = reply.command_succeeded();
-                                // send reply
-                                if need_to_reply {
-                                    if let Err(_) = reply_channel.send(reply) {
-                                        println!("failed to send reply to the player");
-                                        // consider player broken
-                                        *next_command = PlayerCommandState::Finish;
-                                        continue;
+                                    let command_succeeded = reply.command_succeeded();
+                                    // send reply
+                                    if need_to_reply {
+                                        if let Err(_) = reply_channel.send(reply) {
+                                            println!("failed to send reply to the player");
+                                            // consider player broken
+                                            *next_command = PlayerCommandState::Finish;
+                                            continue;
+                                        }
+                                    }
+
+                                    start_timestamps[player_i] = Instant::now(); // update timeout counter
+
+                                    // log operation finish
+                                    if let Some(log_repr) = com.try_log_repr() {
+                                        self.log_writer.add_log_data(
+                                            self.player_states[player_i].log_repr(),
+                                            format!(
+                                                "{}{}({})",
+                                                if command_succeeded { "+" } else { "!" },
+                                                log_repr,
+                                                command_id, // at this point command_id is guaranteed not to be None
+                                            ),
+                                            self.time,
+                                            0,
+                                        );
                                     }
                                 }
-
-                                start_timestamps[player_i] = Instant::now(); // update timeout counter
-
-                                // log operation finish
-                                if let Some(log_repr) = com.try_log_repr() {
-                                    self.log_writer.add_log_data(
-                                        self.player_states[player_i].log_repr(),
-                                        format!(
-                                            "{}{}({})",
-                                            if command_succeeded { "+" } else { "!" },
-                                            log_repr,
-                                            command_id, // at this point command_id is guaranteed not to be None
-                                        ),
-                                        self.time,
-                                        0,
-                                    );
-                                }
+                                _ => unreachable!(),
                             }
-                            _ => unreachable!(),
                         }
                     } else {
                         // no min - means all commands are Finish, but that must have been checked before, so
