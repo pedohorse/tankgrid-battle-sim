@@ -61,10 +61,12 @@ fn test_base<F>(
                     (PlayerCommand::Look(GridOrientation::West), 5),
                     (PlayerCommand::Shoot, 10), // don't forget that successful shoot adds 3*5 wait
                     (PlayerCommand::AfterShootCooldown, 15),
+                    (PlayerCommand::ShotHitSound, 30),
                     (PlayerCommand::Wait, 5),
                     (PlayerCommand::CheckAmmo, 2),
                     (PlayerCommand::CheckHealth, 2),
                     (PlayerCommand::CheckHit, 2),
+                    (PlayerCommand::Listen, 3),
                 ]),
                 HashMap::from([
                     (PlayerCommand::TurnCW, 5),
@@ -335,7 +337,8 @@ fn test_hear() {
                 (
                     new_player(x, y, GridOrientation::East, 0, 1, "player1"),
                     "\
-wait()\n
+# standing still does not make a sound to be listened to\n
+turn_cw()\n
                 "
                     .to_owned(),
                 ),
@@ -344,9 +347,9 @@ wait()\n
                     format!(
                         "\
 res = listen()\n
+print(res)\n
 assert(len(res) == 1)\n
 print('{res} - expecting')
-print(res)\n
 if res[0] == '{res}':\n
     move_forward()\n
                 "
@@ -367,6 +370,84 @@ if res[0] == '{res}':\n
             0,
         );
     }
+}
+
+#[test]
+fn test_hear_no_sound() {
+    
+    test_base(
+        vec![
+            (
+                new_player(25, 2, GridOrientation::East, 0, 1, "player1"),
+                "\
+# standing still does not make a sound to be listened to\n
+wait()
+            "
+                .to_owned(),
+            ),
+            (
+                new_player(24, 5, GridOrientation::North, 0, 1, "player2"),
+                format!(
+                    "\
+res = listen()\n
+print(res)\n
+assert(len(res) == 0)\n
+move_forward()\n
+            "
+                ),
+            ),
+        ],
+        |b, _| {
+            let fwd = (24, 4);
+            assert_eq!(fwd.0, b.player_state(1).col);
+            assert_eq!(fwd.1, b.player_state(1).row);
+        },
+        0,
+        0,
+    );
+    
+}
+
+
+#[test]
+fn test_hear_shoot_impact_sound() {
+    
+    test_base(
+        vec![
+            (
+                new_player(25, 2, GridOrientation::West, 1, 1, "player1"),
+                "\
+shoot()
+move_forward()
+            "
+                .to_owned(),
+            ),
+            (
+                new_player(24, 5, GridOrientation::North, 0, 1, "player2"),
+                format!(
+                    "\
+res = listen()\n
+print(res)\n
+assert(len(res) == 1)\n
+move_forward()\n
+wait()  # wait for after shooting cooldown before listening again\n
+res = listen()\n
+print(res)\n
+assert(len(res) == 2)\n
+move_forward()\n
+            "
+                ),
+            ),
+        ],
+        |b, _| {
+            let fwd = (24, 3);
+            assert_eq!(fwd.0, b.player_state(1).col);
+            assert_eq!(fwd.1, b.player_state(1).row);
+        },
+        0,
+        0,
+    );
+    
 }
 
 #[test]
