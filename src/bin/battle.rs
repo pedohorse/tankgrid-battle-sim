@@ -30,6 +30,7 @@ impl CommandTimer<PlayerCommand<GridOrientation>> for CommandTimings {
     ) -> battle_sim::gametime::GameTime {
         match command {
             PlayerCommand::MoveFwd => 5, // half, half after
+            PlayerCommand::MoveBack => 7, // half, half after
             PlayerCommand::TurnCW => 8,  // half, half after
             PlayerCommand::TurnCCW => 8, // half, half after
             PlayerCommand::Shoot => 5,
@@ -54,6 +55,7 @@ impl CommandTimer<PlayerCommand<GridOrientation>> for CommandTimings {
     ) -> battle_sim::gametime::GameTime {
         match command {
             PlayerCommand::MoveFwd => 5,
+            PlayerCommand::MoveBack => 7,
             PlayerCommand::TurnCW => 8,
             PlayerCommand::TurnCCW => 8,
             PlayerCommand::Shoot => 5,
