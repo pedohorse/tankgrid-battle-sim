@@ -381,8 +381,10 @@ where
 
                     // LOG command start and ASSIGN COMMAND IDs
                     // we do it separately to ensure consistent ordering
-                    for (command, player_state) in
-                        next_commands.iter_mut().zip(self.player_states.iter())
+                    for (player_i, (command, player_state)) in next_commands
+                        .iter_mut()
+                        .zip(self.player_states.iter())
+                        .enumerate()
                     {
                         // note - operation logged here MAY not complete, depending on concrete game logic
                         if let PlayerCommandState::GotCommandQueued(_, _, _) = command {
@@ -409,6 +411,20 @@ where
                                         duration + reply_delay_duration, // log full command time
                                     );
                                 }
+
+                                // call logic's pre-process
+                                // for consistency we call pre-process just after logging, and post-process just before logging
+                                let battle_info = BattleStateInfo::new(self.time);
+                                self.battle_logic.command_received(
+                                    player_i,
+                                    &com,
+                                    command_id,
+                                    &self.player_states,
+                                    &battle_info,
+                                    &mut |obj, act| {
+                                        self.log_writer.add_log_data(obj, act, self.time, 0);
+                                    },
+                                );
 
                                 *command = PlayerCommandState::GotCommand(
                                     com,
@@ -455,11 +471,12 @@ where
                     {
                         // either system event goes first, or user
                         if next_events_queue.len() > 0
-                            && next_events_queue.peek().unwrap().time < self.time + remaining_duration
+                            && next_events_queue.peek().unwrap().time
+                                < self.time + remaining_duration
                         {
                             // processing game events
                             let next_event = next_events_queue.pop().unwrap(); // we checked len in if condition
-                                                                                     // advance time first!
+                                                                               // advance time first!
                             self.time = next_event.time;
                             let battle_state = BattleStateInfo::new(self.time);
 
@@ -499,6 +516,7 @@ where
                                         self.battle_logic.process_commands(
                                             player_i,
                                             &com,
+                                            command_id,
                                             &mut self.player_states,
                                             &battle_state,
                                             &mut |obj, act| {
@@ -538,6 +556,24 @@ where
                                 ) => {
                                     // ONLY Finished command may have None for reply channel by design
                                     //  also we bravely unwrap cuz channels may close only in the start of the loop
+
+                                    // first - call post-processing logic
+                                    // we call reply_delivered just before actually delivering it
+                                    // for consistency we call pre-process just after logging, and post-process just before logging
+                                    let battle_info = BattleStateInfo::new(self.time);
+                                    self.battle_logic.command_reply_delivered(
+                                        player_i,
+                                        &com,
+                                        command_id,
+                                        &self.player_states,
+                                        &battle_info,
+                                        &mut |obj, act| {
+                                            self.log_writer.add_log_data(obj, act, self.time, 0);
+                                        },
+                                    );
+                                    //
+                                    
+                                    // now the actual replying
                                     let reply_channel = &channels[player_i].as_ref().unwrap().1;
 
                                     let command_succeeded = reply.command_succeeded();

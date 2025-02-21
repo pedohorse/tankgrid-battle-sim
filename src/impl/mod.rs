@@ -1,5 +1,6 @@
 pub mod battle_maptile_logic;
 pub mod buf_battle_logger;
+mod timestamped_container;
 pub mod grid_battle;
 pub mod grid_map;
 pub mod grid_map_prober;

@@ -12,6 +12,7 @@ use crate::orientation::SimpleOrientation;
 use crate::player_state::PlayerControl;
 use crate::script_repr::{FromScriptRepr, ToScriptRepr};
 
+use super::timestamped_container::ExpiringContainer;
 use super::simple_object::{ObjectCacheType, SimpleObject};
 
 use std::hash::Hash;
@@ -32,7 +33,8 @@ pub enum PlayerCommand<R> {
     TurnCW,
     TurnCCW,
     Shoot,
-    AfterShootCooldown,
+    AfterShootCooldown, // not a command player can issue, auto issued after shoot
+    ShotHitSound,       // Not an command player can issue. Used ONLT for hit sound timing.
     Wait,
     Print(String),
     CheckAmmo,
@@ -57,6 +59,7 @@ where
             PlayerCommand::TurnCCW => Some("turn-ccw".to_owned()),
             PlayerCommand::Shoot => Some("shoot".to_owned()),
             PlayerCommand::AfterShootCooldown => Some("cooldown".to_owned()),
+            PlayerCommand::ShotHitSound => None,
             PlayerCommand::Wait => Some("wait".to_owned()),
             PlayerCommand::Look(dir) => Some(format!("look[{}]", dir.log_repr())),
             PlayerCommand::Listen => Some(format!("listen")),
@@ -125,6 +128,7 @@ where
     object_layer: OLayer,
     player_count_to_win: usize,
     live_with_no_hp_time: GameTime,
+    sound_log: ExpiringContainer<(usize, usize), GameTime, (i64, i64)>,
     _marker0: PhantomData<R>,
     _marker1: PhantomData<T>,
 }
@@ -172,7 +176,8 @@ where
             .enumerate()
             .filter(|(_, p)| !self.is_player_dead(*p))
             .map(|(i, p)| {
-                some_are_dying = some_are_dying || p.resource_value(HEALTH_RES) == 0 && p.resource_value(DEATH_CHECK_TIME) != 0;
+                some_are_dying = some_are_dying
+                    || p.resource_value(HEALTH_RES) == 0 && p.resource_value(DEATH_CHECK_TIME) != 0;
                 i
             })
             .collect();
@@ -216,9 +221,9 @@ where
         event: &SimpleGameEvent,
         players_states: &mut [P],
         battle_info: &BattleStateInfo,
-        logger: &mut LWF,
+        _logger: &mut LWF,
     ) -> Option<Vec<(GameTime, SimpleGameEvent)>> {
-        let mut new_events = Vec::new();
+        let new_events = Vec::new();
 
         match event {
             SimpleGameEvent::Noop => (),
@@ -240,10 +245,54 @@ where
         }
     }
 
+    fn command_received<LWF>(
+        &mut self,
+        player_i: usize,
+        command: &PlayerCommand<R>,
+        command_id: usize,
+        player_states: &[P],
+        battle_info: &BattleStateInfo,
+        _logger: &mut LWF,
+    ) -> Option<Vec<(GameTime, SimpleGameEvent)>> {
+        match command {
+            PlayerCommand::MoveFwd
+            | PlayerCommand::TurnCW
+            | PlayerCommand::TurnCCW
+            | PlayerCommand::Shoot => {
+                self.sound_log.insert(
+                    (command_id, 0),
+                    player_states[player_i].position(),
+                    battle_info.game_time,
+                    None,
+                );
+            }
+            _ => (),
+        };
+
+        None
+    }
+
+    fn command_reply_delivered<LWF>(
+        &mut self,
+        _player_i: usize,
+        _command: &PlayerCommand<R>,
+        command_id: usize,
+        _player_states: &[P],
+        battle_info: &BattleStateInfo,
+        _logger: &mut LWF,
+    ) -> Option<Vec<(GameTime, SimpleGameEvent)>> {
+        if let Some(vals) = self.sound_log.get_mut(&(command_id, 0)) {
+            vals.1.replace(battle_info.game_time);
+        }
+
+        None
+    }
+
     fn process_commands<LWF>(
         &mut self,
         player_i: usize,
-        com: &PlayerCommand<R>,
+        command: &PlayerCommand<R>,
+        command_id: usize,
         player_states: &mut [P],
         battle_state: &BattleStateInfo,
         logger: &mut LWF,
@@ -256,14 +305,14 @@ where
         LWF: FnMut(String, String),
     {
         // doing any command other than print resets the print counter
-        match com {
+        match command {
             PlayerCommand::Print(_) => (), // do nothing, we expend in the next match
             _ => {
                 player_states[player_i].set_resource(PRINT_COUNTER_RES, MAX_FREE_PRINTS);
             }
         }
 
-        match com {
+        match command {
             PlayerCommand::MoveFwd => {
                 self.recache_players_to_object_layer(player_states);
                 let player_state = &mut player_states[player_i];
@@ -355,6 +404,21 @@ where
                                 player_state.log_repr(),
                                 format!("shoot[{x},{y},{hit_x},{hit_y}]"),
                             );
+
+                            // make sound
+                            self.sound_log.insert(
+                                (command_id, 1),
+                                (hit_x, hit_y),
+                                battle_state.game_time,
+                                Some(
+                                    // duration is taken from ShotHitSound pseudo-command
+                                    battle_state.game_time
+                                        + self.get_command_duration(
+                                            player_state,
+                                            &PlayerCommand::ShotHitSound,
+                                        ),
+                                ),
+                            );
                         }
                         let mut objs_to_destroy = Vec::new();
                         let player_ori = player_state.orientation();
@@ -415,6 +479,7 @@ where
                 }
             }
             PlayerCommand::AfterShootCooldown => (PlayerCommandReply::Ok, None, None),
+            PlayerCommand::ShotHitSound => (PlayerCommandReply::Ok, None, None),
             PlayerCommand::Wait => (PlayerCommandReply::Ok, None, None),
             PlayerCommand::Look(ori) => {
                 // note: look command's ori is relative to tank orientation
@@ -455,16 +520,17 @@ where
                 (PlayerCommandReply::LookResult(look_result), None, None)
             }
             PlayerCommand::Listen => {
-                let mut res = Vec::with_capacity(player_states.len());
+                let mut res_unsorted = Vec::new();
                 let player_state = &player_states[player_i];
                 let my_ori = player_state.orientation();
                 let my_pos = player_state.position();
-                for (i, enemy_state) in player_states.iter().enumerate() {
-                    if i == player_i {
-                        continue;
-                    }
+                for sound_position in self.sound_log.iter_at_timestamp(battle_state.game_time) {
+                    // for (i, enemy_state) in player_states.iter().enumerate() {
+                    //    if i == player_i {
+                    //        continue;
+                    //    }
                     let (to_enemy1, to_enemy2_maybe) =
-                        R::direction_to_closest_orientations(my_pos, enemy_state.position());
+                        R::direction_to_closest_orientations(my_pos, *sound_position);
                     // fucky logic here is to properly assign values to border values
                     let location = if let Some(to_enemy2) = to_enemy2_maybe {
                         // meaning we don't have an exact orientation
@@ -509,8 +575,15 @@ where
                         }
                     };
 
-                    res.push(location.to_owned());
+                    // store distance, location string
+                    let d = (my_pos.0 - sound_position.0, my_pos.1 - sound_position.1);
+                    res_unsorted.push((d.0.abs() + d.1.abs(), location.to_owned()));
                 }
+
+                let res = {
+                    res_unsorted.sort_by(|a, b| a.0.cmp(&b.0));
+                    res_unsorted.into_iter().map(|(_, x)| x).collect()
+                };
                 (PlayerCommandReply::ListenResult(res), None, None)
             }
             PlayerCommand::AddAmmo(ammo) => {
@@ -855,6 +928,7 @@ where
             command_duration,
             player_count_to_win,
             live_with_no_hp_time,
+            sound_log: ExpiringContainer::new(),
             _marker0: PhantomData,
             _marker1: PhantomData,
         }
