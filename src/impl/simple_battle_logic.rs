@@ -30,6 +30,7 @@ pub const MAX_FREE_PRINTS: u64 = 6; // 5 prints, 1 for warning
 #[derive(Clone, PartialEq, Eq, Hash)]
 pub enum PlayerCommand<R> {
     MoveFwd,
+    MoveBack,
     TurnCW,
     TurnCCW,
     Shoot,
@@ -55,6 +56,7 @@ where
     fn try_log_repr(&self) -> Option<String> {
         match self {
             PlayerCommand::MoveFwd => Some("move-forward".to_owned()),
+            PlayerCommand::MoveBack => Some("move-backward".to_owned()),
             PlayerCommand::TurnCW => Some("turn-cw".to_owned()),
             PlayerCommand::TurnCCW => Some("turn-ccw".to_owned()),
             PlayerCommand::Shoot => Some("shoot".to_owned()),
@@ -313,14 +315,20 @@ where
         }
 
         match command {
-            PlayerCommand::MoveFwd => {
+            dir_command@ (PlayerCommand::MoveFwd | PlayerCommand::MoveBack)  => {
                 self.recache_players_to_object_layer(player_states);
                 let player_state = &mut player_states[player_i];
                 let mut extra_commands = None;
 
+                let move_orientation = match dir_command {
+                    PlayerCommand::MoveFwd => player_state.orientation(),
+                    PlayerCommand::MoveBack => player_state.orientation().opposite(),
+                    _ => unreachable!(),
+                };
+
                 let (fwd_pos_x, fwd_pos_y) = self
                     .map_prober
-                    .step_in_direction(player_state.position(), player_state.orientation());
+                    .step_in_direction(player_state.position(), move_orientation);
                 let tile = self.map.get_tile_at(fwd_pos_x, fwd_pos_y);
                 let reply = if self.logic.passable(tile)
                     && self
@@ -707,6 +715,14 @@ where
             move |_vm: &VirtualMachine| -> PyResult<()> {
                 println!("TEST: move_forward");
                 let _ret = comm_chan(PlayerCommand::MoveFwd);
+                PyResult::Ok(())
+            }
+        });
+        add_function!("move_backward", {
+            let comm_chan = comm_chan.clone();
+            move |_vm: &VirtualMachine| -> PyResult<()> {
+                println!("TEST: move_backward");
+                let _ret = comm_chan(PlayerCommand::MoveBack);
                 PyResult::Ok(())
             }
         });
