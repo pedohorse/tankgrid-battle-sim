@@ -22,7 +22,7 @@ use std::vec;
 use rustpython_vm::convert::ToPyObject;
 use rustpython_vm::function::FuncArgs;
 use rustpython_vm::scope::Scope;
-use rustpython_vm::{PyResult, VirtualMachine};
+use rustpython_vm::{PyResult, VirtualMachine, PyObjectRef};
 
 pub const MAX_LOG_LINE_LENGTH: usize = 160;
 pub const MAX_FREE_PRINTS: u64 = 6; // 5 prints, 1 for warning
@@ -684,6 +684,20 @@ where
         FSR: Fn(PlayerCommand<R>) -> Result<PlayerCommandReply<R>, ()> + Clone + 'static,
     {
         macro_rules! add_function {
+            ($fname:expr, ( $($fnames:expr),+ ) , $fn:block) => {
+                let func: PyObjectRef = vm.new_function($fname, $fn).into();
+                $(
+                    let func1 = func.clone();
+                    scope
+                    .globals
+                    .set_item($fnames, func1, vm)
+                    .unwrap();
+                )+
+                scope
+                    .globals
+                    .set_item($fname, func, vm)
+                    .unwrap();
+            };
             ($fname:expr, $fn:block) => {
                 scope
                     .globals
@@ -691,8 +705,7 @@ where
                     .unwrap();
             };
         }
-
-        add_function!("turn_cw", {
+        add_function!("turn_cw", ("turn_right", "turn_r") , {
             // TODO: figure out why do I have to downgrade refs?
             //  it's as if interpreter is not dropped properly and keeps refs
             let comm_chan = comm_chan.clone();
@@ -702,7 +715,7 @@ where
                 PyResult::Ok(())
             }
         });
-        add_function!("turn_ccw", {
+        add_function!("turn_ccw", ("turn_left", "turn_l"), {
             let comm_chan = comm_chan.clone();
             move |_vm: &VirtualMachine| -> PyResult<()> {
                 println!("TEST: turn_ccw");
@@ -710,7 +723,7 @@ where
                 PyResult::Ok(())
             }
         });
-        add_function!("move_forward", {
+        add_function!("move_forward", ("move_fwd"), {
             let comm_chan = comm_chan.clone();
             move |_vm: &VirtualMachine| -> PyResult<()> {
                 println!("TEST: move_forward");
@@ -718,7 +731,7 @@ where
                 PyResult::Ok(())
             }
         });
-        add_function!("move_backward", {
+        add_function!("move_backward", ("move_backwards", "move_back"), {
             let comm_chan = comm_chan.clone();
             move |_vm: &VirtualMachine| -> PyResult<()> {
                 println!("TEST: move_backward");
@@ -726,7 +739,7 @@ where
                 PyResult::Ok(())
             }
         });
-        add_function!("shoot", {
+        add_function!("shoot", ("fire"), {
             let comm_chan = comm_chan.clone();
             move |_vm: &VirtualMachine| -> PyResult<()> {
                 println!("TEST: shoot");
