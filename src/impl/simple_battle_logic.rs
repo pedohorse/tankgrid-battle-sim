@@ -710,7 +710,6 @@ where
             //  it's as if interpreter is not dropped properly and keeps refs
             let comm_chan = comm_chan.clone();
             move |_vm: &VirtualMachine| -> PyResult<()> {
-                println!("TEST: turn_cw");
                 let _ret = comm_chan(PlayerCommand::TurnCW);
                 PyResult::Ok(())
             }
@@ -718,7 +717,6 @@ where
         add_function!("turn_ccw", ("turn_left", "turn_l"), {
             let comm_chan = comm_chan.clone();
             move |_vm: &VirtualMachine| -> PyResult<()> {
-                println!("TEST: turn_ccw");
                 let _ret = comm_chan(PlayerCommand::TurnCCW);
                 PyResult::Ok(())
             }
@@ -726,7 +724,6 @@ where
         add_function!("move_forward", ("move_fwd"), {
             let comm_chan = comm_chan.clone();
             move |_vm: &VirtualMachine| -> PyResult<()> {
-                println!("TEST: move_forward");
                 let _ret = comm_chan(PlayerCommand::MoveFwd);
                 PyResult::Ok(())
             }
@@ -734,7 +731,6 @@ where
         add_function!("move_backward", ("move_backwards", "move_back"), {
             let comm_chan = comm_chan.clone();
             move |_vm: &VirtualMachine| -> PyResult<()> {
-                println!("TEST: move_backward");
                 let _ret = comm_chan(PlayerCommand::MoveBack);
                 PyResult::Ok(())
             }
@@ -742,7 +738,6 @@ where
         add_function!("shoot", ("fire"), {
             let comm_chan = comm_chan.clone();
             move |_vm: &VirtualMachine| -> PyResult<()> {
-                println!("TEST: shoot");
                 let _ret = comm_chan(PlayerCommand::Shoot);
                 PyResult::Ok(())
             }
@@ -750,7 +745,6 @@ where
         add_function!("wait", {
             let comm_chan = comm_chan.clone();
             move |_vm: &VirtualMachine| -> PyResult<()> {
-                println!("TEST: wait");
                 let _ret = comm_chan(PlayerCommand::Wait);
                 PyResult::Ok(())
             }
@@ -758,7 +752,6 @@ where
         add_function!("print", {
             let comm_chan = comm_chan.clone();
             move |args: FuncArgs, vm: &VirtualMachine| -> PyResult<()> {
-                println!("TEST: print");
                 let line = args
                     .args
                     .into_iter()
@@ -788,7 +781,6 @@ where
         add_function!("look", {
             let comm_chan = comm_chan.clone();
             move |direction: String, vm: &VirtualMachine| -> PyResult<_> {
-                println!("TEST: look");
                 // note: look command is RELATIVE to tank orientation
                 let direction = if let Some(x) = R::from_script_repr(&direction) {
                     x
@@ -815,7 +807,6 @@ where
         add_function!("listen", {
             let comm_chan = comm_chan.clone();
             move |vm: &VirtualMachine| {
-                println!("TEST: listen");
                 let ret = if let Ok(x) = comm_chan(PlayerCommand::Listen) {
                     x
                 } else {
@@ -838,7 +829,6 @@ where
         add_function!("check_ammo", {
             let comm_chan = comm_chan.clone();
             move |vm: &VirtualMachine| {
-                println!("TEST: check_ammo");
                 let ret = if let Ok(x) = comm_chan(PlayerCommand::CheckAmmo) {
                     x
                 } else {
@@ -856,7 +846,6 @@ where
         add_function!("check_health", {
             let comm_chan = comm_chan.clone();
             move |vm: &VirtualMachine| {
-                println!("TEST: check_health");
                 let ret = if let Ok(x) = comm_chan(PlayerCommand::CheckHealth) {
                     x
                 } else {
@@ -874,7 +863,6 @@ where
         add_function!("check_hit", {
             let comm_chan = comm_chan.clone();
             move |vm: &VirtualMachine| {
-                println!("TEST: check_hit");
                 let ret = if let Ok(x) = comm_chan(PlayerCommand::CheckHit) {
                     x
                 } else {
@@ -892,7 +880,6 @@ where
         add_function!("reset_hit", {
             let comm_chan = comm_chan.clone();
             move |_vm: &VirtualMachine| -> PyResult<()> {
-                println!("TEST: reset_hit");
                 let _ret = comm_chan(PlayerCommand::ResetHit);
                 PyResult::Ok(())
             }
@@ -900,7 +887,6 @@ where
         add_function!("time", {
             let comm_chan = comm_chan.clone();
             move |vm: &VirtualMachine| {
-                println!("TEST: test");
                 let ret = if let Ok(x) = comm_chan(PlayerCommand::Time) {
                     x
                 } else {
