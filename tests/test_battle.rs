@@ -115,6 +115,39 @@ fn test_move_fwd() {
 }
 
 #[test]
+fn test_move_fwd_aliases() {
+    let map = GridBattleMap::new(2, 2, SimpleTileType::Nothin, SimpleTileType::Nothin);
+    let logger = VecLogWriter::new();
+    let mut b = GridBattle::new(
+        SimpleBattleLogic::new(
+            map,
+            TestTrivialLogic {},
+            GridMapProber {},
+            SimpleBattleObjectLayer::new(),
+            FnCommandTimer::new(|com| match com {
+                PlayerCommand::Print(_) => 0,
+                _ => 10,
+            }),
+            0,
+            0,
+        ),
+        vec![(
+            new_player(0, 0, GridOrientation::South, 0, 1, "player1"),
+            "\
+            move_fwd()\n\
+            "
+            .to_owned(),
+        )],
+        logger,
+    );
+    b.run_simulation();
+    println!("BATTLE LOG:");
+    b.log_writer().print();
+    assert_eq!(DEFAULT_COMMAND_DURATION, b.time());
+    assert_eq!((0, 1), b.player_state(0).position());
+}
+
+#[test]
 fn test_move_back() {
     let map = GridBattleMap::new(2, 2, SimpleTileType::Nothin, SimpleTileType::Nothin);
     let logger = VecLogWriter::new();
@@ -145,6 +178,40 @@ fn test_move_back() {
     b.log_writer().print();
     assert_eq!(DEFAULT_COMMAND_DURATION, b.time());
     assert_eq!((0, -1), b.player_state(0).position());
+}
+
+#[test]
+fn test_move_back_aliaces() {
+    let map = GridBattleMap::new(2, 2, SimpleTileType::Nothin, SimpleTileType::Nothin);
+    let logger = VecLogWriter::new();
+    let mut b = GridBattle::new(
+        SimpleBattleLogic::new(
+            map,
+            TestTrivialLogic {},
+            GridMapProber {},
+            SimpleBattleObjectLayer::new(),
+            FnCommandTimer::new(|com| match com {
+                PlayerCommand::Print(_) => 0,
+                _ => 10,
+            }),
+            0,
+            0,
+        ),
+        vec![(
+            new_player(0, 0, GridOrientation::South, 0, 1, "player1"),
+            "\
+            move_back()\n\
+            move_backwards()\n\
+            "
+            .to_owned(),
+        )],
+        logger,
+    );
+    b.run_simulation();
+    println!("BATTLE LOG:");
+    b.log_writer().print();
+    assert_eq!(DEFAULT_COMMAND_DURATION * 2, b.time());
+    assert_eq!((0, -2), b.player_state(0).position());
 }
 
 #[test]
